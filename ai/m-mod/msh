@@ -1,0 +1,294 @@
+#!/bin/sh
+
+#-------------------------------------------------------------------------------
+# ERROR CODES
+#-------------------------------------------------------------------------------
+
+# exit codes identify the phase where the error occurred, detail of the error is given by the message
+RumiAI_FATAL_EXIT_CODE=1
+RumiAI_FATAL_EXIT_CODE_ROOT_RESOLUTION=1
+RumiAI_FATAL_EXIT_CODE_TEXT=2
+RumiAI_FATAL_EXIT_CODE_LANG=3
+RumiAI_FATAL_EXIT_CODE_LOGGER=4
+RumiAI_FATAL_EXIT_CODE_OSARCH=5
+RumiAI_FATAL_EXIT_CODE_EXECUTION=6
+
+RumiAI_exit_codes_cleanup()
+{
+  unset -v -- \
+    RumiAI_FATAL_EXIT_CODE \
+    RumiAI_FATAL_EXIT_CODE_ROOT_RESOLUTION \
+    RumiAI_FATAL_EXIT_CODE_TEXT \
+    RumiAI_FATAL_EXIT_CODE_LANG \
+    RumiAI_FATAL_EXIT_CODE_LOGGER \
+    RumiAI_FATAL_EXIT_CODE_OSARCH \
+    RumiAI_FATAL_EXIT_CODE_EXECUTION
+}
+
+#-------------------------------------------------------------------------------
+# FATAL ERROR FUNCTION
+#-------------------------------------------------------------------------------
+
+RumiAI_fatal()
+{
+  if [ -n "$2" ]
+  then
+    printf -- '%s\n' "$2" >&2
+  fi
+
+  case "$1" in
+    *[!0-9]* | "")
+      exit 1
+      ;;
+    *)
+      exit "$1"
+      ;;
+  esac
+}
+
+#-------------------------------------------------------------------------------
+# CANONICALIZE EXISTING PATH FUNCTION
+#-------------------------------------------------------------------------------
+
+# RumiAI_path_canonicalize_existing <path>
+# returns a canonicalized version of <path>, return error if does not exist
+RumiAI_path_canonicalize_existing()
+(
+  if [ ! "$#" -eq 1 ] || [ ! -e "$1" ] || ! RumiAI_path_output="$(command -p -- realpath -- "$1" 2>/dev/null)x"
+  then
+    return 1
+  fi
+
+  RumiAI_path_output="${RumiAI_path_output%x}"
+
+  [ -e "$RumiAI_path_output" ] || return 1
+  printf -- '%s\n' "$RumiAI_path_output"
+)
+
+#-------------------------------------------------------------------------------
+# ROOT RESOLUTION
+#-------------------------------------------------------------------------------
+
+# error codes
+RumiAI_FATAL_EXIT_CODE="$RumiAI_FATAL_EXIT_CODE_ROOT_RESOLUTION"
+
+# if invoked by PATH search, then acquire path used
+case $0 in
+  */*)
+    RumiAI_BOOTSTRAP_BIN=$0
+    ;;
+  *)
+    RumiAI_BOOTSTRAP_BIN=$(command -v -- "$0" 2>/dev/null) || RumiAI_fatal "$RumiAI_FATAL_EXIT_CODE" 'RumiAI_BOOTSTRAP_BIN_RESOLUTION_ERROR'
+    ;;
+esac
+
+# canonicalize the path of this script
+RumiAI_BOOTSTRAP_BIN=$(RumiAI_path_canonicalize_existing "$RumiAI_BOOTSTRAP_BIN") || RumiAI_fatal "$RumiAI_FATAL_EXIT_CODE" 'RumiAI_BOOTSTRAP_FATAL_REALPATH_ERROR'
+
+# check that it is really a file
+[ -f "$RumiAI_BOOTSTRAP_BIN" ] || RumiAI_fatal "$RumiAI_FATAL_EXIT_CODE" 'RumiAI_BOOTSTRAP_FATAL_BIN_ERROR'
+
+# extract root
+RumiAI_ROOT=${RumiAI_BOOTSTRAP_BIN%/*}
+[ -n "$RumiAI_ROOT" ] || RumiAI_ROOT=/
+
+# check can cd into it
+(cd -- "$RumiAI_ROOT" 2>/dev/null) || RumiAI_fatal "$RumiAI_FATAL_EXIT_CODE" 'RumiAI_BOOTSTRAP_FATAL_ROOT_ERROR'
+
+# export root
+export -- RumiAI_BOOTSTRAP_BIN RumiAI_ROOT
+
+readonly -- RumiAI_BOOTSTRAP_BIN RumiAI_ROOT
+
+#-------------------------------------------------------------------------------
+# FUNDAMENTAL SYSTEM DIRECTORIES
+#-------------------------------------------------------------------------------
+
+# set values
+RumiAI_BIN_DIR=$RumiAI_ROOT/bin
+RumiAI_BIN_SYS_DIR=$RumiAI_BIN_DIR/@sys
+RumiAI_LIB_DIR=$RumiAI_ROOT/lib
+RumiAI_CONF_DIR=$RumiAI_ROOT/conf
+RumiAI_LANG_DIR=$RumiAI_ROOT/lang
+
+# export vars
+export -- \
+  RumiAI_BIN_DIR \
+  RumiAI_BIN_SYS_DIR \
+  RumiAI_LIB_DIR \
+  RumiAI_CONF_DIR \
+  RumiAI_LANG_DIR
+
+readonly -- \
+  RumiAI_BIN_DIR \
+  RumiAI_BIN_SYS_DIR \
+  RumiAI_LIB_DIR \
+  RumiAI_CONF_DIR \
+  RumiAI_LANG_DIR
+
+#-------------------------------------------------------------------------------
+# TEXT
+#-------------------------------------------------------------------------------
+
+# error codes
+RumiAI_FATAL_EXIT_CODE="$RumiAI_FATAL_EXIT_CODE_TEXT"
+
+# load lib
+command -- . "$RumiAI_LIB_DIR/text.lib" || RumiAI_fatal "$RumiAI_FATAL_EXIT_CODE" 'RumiAI_BOOTSTRAP_FATAL_TEXT_LOAD_ERROR'
+
+#-------------------------------------------------------------------------------
+# LANG
+#-------------------------------------------------------------------------------
+
+# error codes
+RumiAI_FATAL_EXIT_CODE="$RumiAI_FATAL_EXIT_CODE_LANG"
+
+# load lib
+command -- . "$RumiAI_LIB_DIR/lang.lib" || RumiAI_fatal "$RumiAI_FATAL_EXIT_CODE" 'RumiAI_BOOTSTRAP_FATAL_LANG_LOAD_ERROR'
+
+# init
+RumiAI_lang_init
+
+# export variables
+export -- RumiAI_LANGUAGE RumiAI_LANGUAGE_FALLBACK RumiAI_TEXT_ENCODING
+
+#-------------------------------------------------------------------------------
+# LOGGER
+#-------------------------------------------------------------------------------
+
+# error codes
+RumiAI_FATAL_EXIT_CODE="$RumiAI_FATAL_EXIT_CODE_LOGGER"
+
+# load lib
+command -- . "$RumiAI_LIB_DIR/log.lib" || RumiAI_fatal "$RumiAI_FATAL_EXIT_CODE" 'RumiAI_BOOTSTRAP_FATAL_LOG_LOAD_ERROR'
+
+#-------------------------------------------------------------------------------
+# OSARCH DETECTION
+#-------------------------------------------------------------------------------
+
+# error codes
+RumiAI_FATAL_EXIT_CODE="$RumiAI_FATAL_EXIT_CODE_OSARCH"
+
+RumiAI_OSARCH_OS=$(command -p uname -s 2>/dev/null) || RumiAI_fatal "$RumiAI_FATAL_EXIT_CODE" 'RumiAI_BOOTSTRAP_FATAL_OSARCH_ERROR'
+
+case $RumiAI_OSARCH_OS in
+  Linux)
+    RumiAI_OSARCH_OS="linux"
+    ;;
+  Darwin)
+    RumiAI_OSARCH_OS="macos"
+    ;;
+  MINGW*|MSYS*|CYGWIN*)
+    RumiAI_OSARCH_OS="windows"
+    ;;
+  *)
+    # replace with message from logger
+    printf -- '%s\n' 'RumiAI_BOOTSTRAP_OSARCH_UNKNOWN_OS_WARNING' >&2
+    ;;
+esac
+
+RumiAI_OSARCH_ARCH=$(command -p uname -m 2>/dev/null) || RumiAI_fatal "$RumiAI_FATAL_EXIT_CODE" 'RumiAI_BOOTSTRAP_FATAL_OSARCH_ERROR'
+
+case $RumiAI_OSARCH_ARCH in
+  arm64|aarch64)
+    RumiAI_OSARCH_ARCH="arm64"
+    ;;
+  x86_64|amd64|AMD64)
+    RumiAI_OSARCH_ARCH="x86_64"
+    ;;
+  *)
+    # replace with message from logger
+    printf -- '%s\n' 'RumiAI_BOOTSTRAP_OSARCH_UNKNOWN_ARCH_WARNING' >&2
+    ;;
+esac
+
+RumiAI_OSARCH=$RumiAI_OSARCH_OS-$RumiAI_OSARCH_ARCH
+RumiAI_OSARCH_BIN_DIR=$RumiAI_BIN_DIR/@osarch/$RumiAI_OSARCH
+RumiAI_OSARCH_BIN_SYS_DIR=$RumiAI_OSARCH_BIN_DIR/@sys
+
+PATH=$RumiAI_OSARCH_BIN_SYS_DIR:$RumiAI_OSARCH_BIN_DIR:$RumiAI_BIN_SYS_DIR:$RumiAI_BIN_DIR${PATH:+:$PATH}
+
+export -- \
+  RumiAI_OSARCH_OS \
+  RumiAI_OSARCH_ARCH \
+  RumiAI_OSARCH \
+  RumiAI_OSARCH_BIN_DIR \
+  PATH
+
+readonly -- \
+  RumiAI_OSARCH_OS \
+  RumiAI_OSARCH_ARCH \
+  RumiAI_OSARCH \
+  RumiAI_OSARCH_BIN_DIR
+
+#-------------------------------------------------------------------------------
+# SHELL
+#-------------------------------------------------------------------------------
+
+# conf files
+RumiAI_CONF_FILE_SHELL_DEFAULT=$RumiAI_CONF_DIR/shell/default
+
+# set var - shell
+if ! RumiAI_SHELL="$(command -p -- cat "$RumiAI_CONF_FILE_SHELL_DEFAULT" 2>/dev/null)"
+then
+  printf -- '%s\n' 'RumiAI_BOOTSTRAP_ERROR_SHELL_DEFAULT_LOAD_ERROR' >&2
+  RumiAI_SHELL=sh
+fi
+
+if ! command -v -- "$RumiAI_SHELL" >/dev/null 2>&1
+then
+  printf -- '%s\n' 'RumiAI_BOOTSTRAP_ERROR_SHELL_DEFAULT_LOAD_ERROR' >&2
+  RumiAI_SHELL=sh
+fi
+
+# unset variables
+unset -v -- RumiAI_CONF_FILE_SHELL_DEFAULT
+
+# export variables
+export -- RumiAI_SHELL
+
+readonly -- RumiAI_SHELL
+
+#-------------------------------------------------------------------------------
+# EXECUTE
+#-------------------------------------------------------------------------------
+
+# error codes
+RumiAI_FATAL_EXIT_CODE="$RumiAI_FATAL_EXIT_CODE_EXECUTION"
+
+# execute shell
+if [ "$#" -eq 0 ]
+then
+  RumiAI_exit_codes_cleanup
+  "$RumiAI_SHELL"
+  exit $?
+fi
+
+# execute command
+RumiAI_COMMAND_ENTRY=$1
+shift
+
+if ! RumiAI_COMMAND_BIN=$(RumiAI_path_canonicalize_existing "$RumiAI_COMMAND_ENTRY")
+then
+  log error bootstrap command-entry-resolution-failed path "$RumiAI_COMMAND_ENTRY"
+  exit "$RumiAI_FATAL_EXIT_CODE"
+fi
+
+if [ ! -f "$RumiAI_COMMAND_BIN" ] || [ ! -r "$RumiAI_COMMAND_BIN" ] || [ "$RumiAI_COMMAND_BIN" = "$RumiAI_BOOTSTRAP_BIN" ]
+then
+  log error bootstrap invalid-command-entry path "$RumiAI_COMMAND_BIN"
+  exit "$RumiAI_FATAL_EXIT_CODE"
+fi
+
+# error codes - unset variables
+unset -v -- RumiAI_COMMAND_ENTRY
+RumiAI_exit_codes_cleanup
+
+# export variables
+export -- RumiAI_COMMAND_BIN
+
+readonly -- RumiAI_COMMAND_BIN
+
+# execute command
+. "$RumiAI_COMMAND_BIN"
+exit $?

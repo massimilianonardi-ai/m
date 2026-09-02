@@ -1,0 +1,45 @@
+#!/bin/sh
+
+RumiAI_text_safe_id()
+{
+  [ "$#" -eq 1 ] || return 1
+
+  case "$1" in
+    # first character match
+    [a-z0-9]*)
+      # middle characters and final character exclusions
+      case $1 in
+        *[!a-z0-9._-]* | *[._-])
+          return 1
+          ;;
+      esac
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  return 0
+}
+
+RumiAI_text_safe_id_case()
+{
+  [ "$#" -eq 1 ] || return 1
+
+  case "$1" in
+    # first character match
+    [A-Za-z0-9]*)
+      # middle characters and final character exclusions
+      case $1 in
+        *[!A-Za-z0-9._-]* | *[._-])
+          return 1
+          ;;
+      esac
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  return 0
+}

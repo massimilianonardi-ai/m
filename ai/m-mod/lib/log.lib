@@ -1,0 +1,222 @@
+#!/bin/sh
+
+: "${RumiAI_LOG_LEVEL:=info}"
+
+RumiAI_log_level_priority()
+{
+  case $1 in
+    off | none)
+      printf -- '%s\n' 0
+      ;;
+    fatal)
+      printf -- '%s\n' 1
+      ;;
+    error)
+      printf -- '%s\n' 2
+      ;;
+    warn)
+      printf -- '%s\n' 3
+      ;;
+    info)
+      printf -- '%s\n' 4
+      ;;
+    debug)
+      printf -- '%s\n' 5
+      ;;
+    trace | all)
+      printf -- '%s\n' 6
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+RumiAI_log_fields_valid()
+(
+  [ "$(( $# % 2 ))" -eq 0 ] || return 1
+
+  while [ "$#" -gt 0 ]
+  do
+    RumiAI_text_safe_id "$1" || return 1
+    shift 2
+  done
+
+  return 0
+)
+
+RumiAI_log_escape_field_value()
+{
+  RumiAI_LOG_ESCAPE_TAB=$(printf '\t')
+  RumiAI_LOG_ESCAPE_CR=$(printf '\r')
+
+  RumiAI_log_escape_out=
+  RumiAI_log_escape_nr=0
+  RumiAI_log_escape_last_read_status=1
+
+  while :
+  do
+    RumiAI_log_escape_line=
+    IFS= read -r RumiAI_log_escape_line
+    RumiAI_log_escape_read_status=$?
+
+    if [ "$RumiAI_log_escape_read_status" -ne 0 ] &&
+       [ -z "$RumiAI_log_escape_line" ]
+    then
+      break
+    fi
+
+    RumiAI_log_escape_last_read_status=$RumiAI_log_escape_read_status
+
+    RumiAI_log_escape_nr=$((RumiAI_log_escape_nr + 1))
+    [ "$RumiAI_log_escape_nr" -gt 1 ] &&
+      RumiAI_log_escape_out=$RumiAI_log_escape_out'\n'
+
+    RumiAI_log_escape_rest=$RumiAI_log_escape_line
+
+    while [ -n "$RumiAI_log_escape_rest" ]
+    do
+      RumiAI_log_escape_chunk=${RumiAI_log_escape_rest%%[\\\"$RumiAI_LOG_ESCAPE_TAB$RumiAI_LOG_ESCAPE_CR]*}
+      RumiAI_log_escape_out=$RumiAI_log_escape_out$RumiAI_log_escape_chunk
+      RumiAI_log_escape_rest=${RumiAI_log_escape_rest#"$RumiAI_log_escape_chunk"}
+
+      case $RumiAI_log_escape_rest in
+        "")                        break ;;
+        '\'*)                      RumiAI_log_escape_out=$RumiAI_log_escape_out'\\' ;;
+        '"'*)                      RumiAI_log_escape_out=$RumiAI_log_escape_out'\"' ;;
+        "$RumiAI_LOG_ESCAPE_TAB"*) RumiAI_log_escape_out=$RumiAI_log_escape_out'\t' ;;
+        "$RumiAI_LOG_ESCAPE_CR"*)  RumiAI_log_escape_out=$RumiAI_log_escape_out'\r' ;;
+      esac
+
+      RumiAI_log_escape_rest=${RumiAI_log_escape_rest#?}
+    done
+  done
+
+  [ "$RumiAI_log_escape_last_read_status" -eq 0 ] &&
+    RumiAI_log_escape_out=$RumiAI_log_escape_out'\n'
+
+  printf -- '%s' "$RumiAI_log_escape_out"
+}
+
+# RumiAI_log_escape_field_value()
+# {
+#   RumiAI_LOG_ESCAPE_TAB=$(printf '\t')
+#   RumiAI_LOG_ESCAPE_CR=$(printf '\r')
+#
+#   RumiAI_log_escape_out=
+#   RumiAI_log_escape_nr=0
+#
+#   while IFS= read -r RumiAI_log_escape_line || [ -n "$RumiAI_log_escape_line" ]
+#   do
+#     RumiAI_log_escape_nr=$((RumiAI_log_escape_nr + 1))
+#     [ "$RumiAI_log_escape_nr" -gt 1 ] && RumiAI_log_escape_out=$RumiAI_log_escape_out'\n'
+#
+#     RumiAI_log_escape_rest=$RumiAI_log_escape_line
+#
+#     while [ -n "$RumiAI_log_escape_rest" ]
+#     do
+#       RumiAI_log_escape_chunk=${RumiAI_log_escape_rest%%[\\\"$RumiAI_LOG_ESCAPE_TAB$RumiAI_LOG_ESCAPE_CR]*}
+#       RumiAI_log_escape_out=$RumiAI_log_escape_out$RumiAI_log_escape_chunk
+#       RumiAI_log_escape_rest=${RumiAI_log_escape_rest#"$RumiAI_log_escape_chunk"}
+#
+#       case $RumiAI_log_escape_rest in
+#         "")                        break ;;
+#         '\'*)                      RumiAI_log_escape_out=$RumiAI_log_escape_out'\\' ;;
+#         '"'*)                      RumiAI_log_escape_out=$RumiAI_log_escape_out'\"' ;;
+#         "$RumiAI_LOG_ESCAPE_TAB"*) RumiAI_log_escape_out=$RumiAI_log_escape_out'\t' ;;
+#         "$RumiAI_LOG_ESCAPE_CR"*)  RumiAI_log_escape_out=$RumiAI_log_escape_out'\r' ;;
+#       esac
+#
+#       RumiAI_log_escape_rest=${RumiAI_log_escape_rest#?}
+#     done
+#   done
+#
+#   printf -- '%s' "$RumiAI_log_escape_out"
+# }
+
+log()
+(
+  [ "$#" -ge 3 ] || return 1
+
+  RumiAI_log_severity=$1
+  shift
+
+  case $RumiAI_log_severity in
+    fatal)
+      RumiAI_log_priority=1
+      ;;
+    error)
+      RumiAI_log_priority=2
+      ;;
+    warn)
+      RumiAI_log_priority=3
+      ;;
+    info)
+      RumiAI_log_priority=4
+      ;;
+    debug)
+      RumiAI_log_priority=5
+      ;;
+    trace)
+      RumiAI_log_priority=6
+      ;;
+    *)
+      return 2
+      ;;
+  esac
+
+  if ! RumiAI_log_threshold=$(RumiAI_log_level_priority "$RumiAI_LOG_LEVEL")
+  then
+    return 6
+  fi
+
+  [ "$RumiAI_log_priority" -le "$RumiAI_log_threshold" ] || return 0
+
+  RumiAI_log_domain=$1
+  RumiAI_log_message_id=$2
+  shift 2
+
+  RumiAI_text_safe_id "$RumiAI_log_domain" || \
+    return 3
+
+  RumiAI_text_safe_id "$RumiAI_log_message_id" || \
+    return 4
+
+  RumiAI_log_fields_valid "$@" || return 5
+
+  if ! RumiAI_log_message=$(lang "$RumiAI_log_domain" "$RumiAI_log_message_id")
+  then
+    RumiAI_log_message=$RumiAI_log_domain.$RumiAI_log_message_id
+  fi
+
+  if ! RumiAI_log_timestamp=$(command -p -- date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null)
+  then
+    RumiAI_log_timestamp=-
+  fi
+
+  printf -- '[%s] [%s] [%s.%s] %s' \
+    "$RumiAI_log_timestamp" \
+    "$RumiAI_log_severity" \
+    "$RumiAI_log_domain" \
+    "$RumiAI_log_message_id" \
+    "$RumiAI_log_message" >&2
+
+  while [ "$#" -gt 0 ]
+  do
+    RumiAI_log_field_name=$1
+    RumiAI_log_field_value=$2
+    shift 2
+
+    if ! RumiAI_log_field_rendered=$(printf -- '%s' "$RumiAI_log_field_value" | RumiAI_log_escape_field_value)
+    # if ! RumiAI_log_field_rendered=$(printf -- '%s' "${RumiAI_log_field_value}")
+    then
+      RumiAI_log_field_rendered='<unrenderable>'
+    fi
+
+    printf -- ' [%s="%s"]' \
+      "$RumiAI_log_field_name" \
+      "$RumiAI_log_field_rendered" >&2
+  done
+
+  printf -- '\n' >&2
+)

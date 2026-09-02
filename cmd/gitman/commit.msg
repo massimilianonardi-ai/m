@@ -1,1 +1,1 @@
-ai project from scratch
+ai rumiai-os and m-mod
