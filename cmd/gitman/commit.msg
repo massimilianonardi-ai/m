@@ -1,1 +1,1 @@
-ai rumiai-os and m-mod
+readc2 better compatibility
