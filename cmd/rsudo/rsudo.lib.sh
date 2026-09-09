@@ -78,12 +78,12 @@ rsudo_core()
     fi
   fi
 
-  log_debug "ARGS - START"
-  for k in "$@"
-  do
-    log_debug "$k"
-  done
-  log_debug "ARGS - END"
+  # log_debug "ARGS - START"
+  # for k in "$@"
+  # do
+  #   log_debug "$k"
+  # done
+  # log_debug "ARGS - END"
 
   # prepare vars for executing
   # export DISPLAY=":0.0"
