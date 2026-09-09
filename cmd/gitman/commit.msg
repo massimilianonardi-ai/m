@@ -1,1 +1,1 @@
-readc2 better compatibility
+rsudo experiment failed, back to original working

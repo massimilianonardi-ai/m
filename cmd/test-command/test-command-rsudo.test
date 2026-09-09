@@ -29,7 +29,7 @@ test_rsudo()
   # rsudo ""
 
   # commands from args interactive session
-  # RSUDO_INTERACTIVE="true" rsudo sh -c "read -p 'type something: ' x; echo 'you typed: '\$x"
+  RSUDO_INTERACTIVE="true" rsudo sh -c "read -p 'type something: ' x; echo 'you typed: '\$x"
   # echo "pwd" | RSUDO_INTERACTIVE="true" rsudo sh -c "read -p 'type something: ' x; echo 'you typed: '\$x"
   # RSUDO_INTERACTIVE="true" rsudo top
   # rsudo top # error because executed not interactively
@@ -221,54 +221,54 @@ test_rsudo()
   # rsudo apisix ###############################################################
   # rsudo apisix
   # rsudo apisix test
-  rssh << 'EOF'
-RSUDO_ENC_PASS="$RSUDO_PASSWORD"
-# PATH="/m/src/git/rpr/cmd/rpr-jobs:$PATH"
-PATH="/m/src/git/rpr/cmd/rpr-rsudo-jobs:$PATH"
-rsudoenv_load rpr-env.enc
-# set | grep RSUDO_ENV
-
-# rsudoenv get portale
-# rsudo --interactive
-rsudoenv_get apisix
-# rsudoenv get portale_dev
-# rsudo apisix key
-# rsudo apisix keyset APISIX_ADMIN_KEY
-# set | grep APISIX
-rsudo apisix json_string_or_array "uri" "uris" "uri1"
-rsudo apisix json_string_or_array "uri" "uris" "uri1 uri2"
-# env_eval "$APISIX_PLUGIN_CONF_KEYCLOAK_AUTHN_TEMPLATE" "my_client_id" "my_client_secret" "my_callback_uri1"
-# env_eval_set "APISIX_TEST_VAR" "$APISIX_PLUGIN_CONF_KEYCLOAK_AUTHN_TEMPLATE" "my_client_id" "my_client_secret" "my_callback_uri1"
-# echo "APISIX_TEST_VAR=<<<$APISIX_TEST_VAR>>>"
-# rsudo apisix set_auth_vars "apisix_host.local" "443" "keycloak_host.local" "443" "keycloak-realm" "kc_apisix_client_id" "kc_apisix_client_secret" "kc_apisix_client_session_secret"
-# rsudo apisix set_auth_vars "apisix_host.local" "9443" "keycloak_host.local" "8443" "keycloak-realm" "kc_apisix_client_id" "kc_apisix_client_secret" "kc_apisix_client_session_secret"
-
-# rsudoenv_get portale_dev
-# rsudo keycloak set_auth_vars "portale.rpr-spa.it" "8443" "master"
-# rsudo keycloak access_token_set ACCESS_TOKEN admin ???
-rsudoenv_get keycloak
-rsudo keycloak set_auth_vars "keycloak.rpr-spa.it" "8443" "master"
-rsudo keycloak access_token admin admin
-rsudo keycloak access_token_set ACCESS_TOKEN admin admin
-rsudo keycloak set_auth_vars "keycloak.rpr-spa.it" "8443" "rpr"
-echo "ACCESS_TOKEN=$ACCESS_TOKEN"
-rsudo keycloak create client '{"protocol":"openid-connect","clientId":"TEST_CLIENT"}'
-rsudo keycloak get client "TEST_CLIENT"
-rsudo keycloak delete client "TEST_CLIENT"
-# rsudo keycloak get "/clients"
-# set | grep KEYCLOAK
-
-# rsudo apisix api "routes"
-# rsudo apisix get "routes"
-# rsudo apisix create service_simple "test-service-id" "https" "my_host.local:80"
-# rsudo apisix get "services"
-# rsudo apisix create route "test-route-id" "uri1 uri2" '"service_id": "test-service-id"'
-# rsudo apisix get "routes"
-# rsudo apisix delete route "test-route-id"
-# rsudo apisix get "routes"
-# rsudo apisix delete service "test-service-id"
-# rsudo apisix get "services"
-EOF
+#   rssh << 'EOF'
+# RSUDO_ENC_PASS="$RSUDO_PASSWORD"
+# # PATH="/m/src/git/rpr/cmd/rpr-jobs:$PATH"
+# PATH="/m/src/git/rpr/cmd/rpr-rsudo-jobs:$PATH"
+# rsudoenv_load rpr-env.enc
+# # set | grep RSUDO_ENV
+#
+# # rsudoenv get portale
+# # rsudo --interactive
+# rsudoenv_get apisix
+# # rsudoenv get portale_dev
+# # rsudo apisix key
+# # rsudo apisix keyset APISIX_ADMIN_KEY
+# # set | grep APISIX
+# rsudo apisix json_string_or_array "uri" "uris" "uri1"
+# rsudo apisix json_string_or_array "uri" "uris" "uri1 uri2"
+# # env_eval "$APISIX_PLUGIN_CONF_KEYCLOAK_AUTHN_TEMPLATE" "my_client_id" "my_client_secret" "my_callback_uri1"
+# # env_eval_set "APISIX_TEST_VAR" "$APISIX_PLUGIN_CONF_KEYCLOAK_AUTHN_TEMPLATE" "my_client_id" "my_client_secret" "my_callback_uri1"
+# # echo "APISIX_TEST_VAR=<<<$APISIX_TEST_VAR>>>"
+# # rsudo apisix set_auth_vars "apisix_host.local" "443" "keycloak_host.local" "443" "keycloak-realm" "kc_apisix_client_id" "kc_apisix_client_secret" "kc_apisix_client_session_secret"
+# # rsudo apisix set_auth_vars "apisix_host.local" "9443" "keycloak_host.local" "8443" "keycloak-realm" "kc_apisix_client_id" "kc_apisix_client_secret" "kc_apisix_client_session_secret"
+#
+# # rsudoenv_get portale_dev
+# # rsudo keycloak set_auth_vars "portale.rpr-spa.it" "8443" "master"
+# # rsudo keycloak access_token_set ACCESS_TOKEN admin ???
+# rsudoenv_get keycloak
+# rsudo keycloak set_auth_vars "keycloak.rpr-spa.it" "8443" "master"
+# rsudo keycloak access_token admin admin
+# rsudo keycloak access_token_set ACCESS_TOKEN admin admin
+# rsudo keycloak set_auth_vars "keycloak.rpr-spa.it" "8443" "rpr"
+# echo "ACCESS_TOKEN=$ACCESS_TOKEN"
+# rsudo keycloak create client '{"protocol":"openid-connect","clientId":"TEST_CLIENT"}'
+# rsudo keycloak get client "TEST_CLIENT"
+# rsudo keycloak delete client "TEST_CLIENT"
+# # rsudo keycloak get "/clients"
+# # set | grep KEYCLOAK
+#
+# # rsudo apisix api "routes"
+# # rsudo apisix get "routes"
+# # rsudo apisix create service_simple "test-service-id" "https" "my_host.local:80"
+# # rsudo apisix get "services"
+# # rsudo apisix create route "test-route-id" "uri1 uri2" '"service_id": "test-service-id"'
+# # rsudo apisix get "routes"
+# # rsudo apisix delete route "test-route-id"
+# # rsudo apisix get "routes"
+# # rsudo apisix delete service "test-service-id"
+# # rsudo apisix get "services"
+# EOF
 
   # rsudo keycloak #############################################################
   # rsudo keycloak
