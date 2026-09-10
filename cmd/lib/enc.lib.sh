@@ -2,109 +2,215 @@
 
 #------------------------------------------------------------------------------
 
-# generates a POSIX compliant random number between 0 and 1 by the use of awk
-# rand()
-# {
-#   echo "" | awk -v rseed=$RANDOM 'BEGIN{srand(rseed);}{print rand(); exit}'
-# }
-
-#------------------------------------------------------------------------------
-
-# generates a POSIX compliant random number between $1 and $2 by the use of awk
-# maximum allowed value for max range is 999999999999999999 (awk limitation)
-# randint $min $max
-# randint $max - (min=0)
-# randint - (min=0, max=255)
-# randint()
-# {
-#   if [ "$#" = "0" ]
-#   then
-#     set -- "0" "255"
-#   elif [ "$#" = "1" ]
-#   then
-#     set -- "0" "$1"
-#   fi
+# randh [bytes]
 #
-#   if [ "$1" -ne "$1" ] || [ "$2" -ne "$2" ]
-#   then
-#     exit 1
-#   fi
+# Generates cryptographically secure random bytes and writes them as
+# lowercase hexadecimal characters followed by a newline.
 #
-#   awk -v rseed=$RANDOM "BEGIN{srand(rseed); print int(rand()*($2-$1+1))+$1}"
-# }
+# bytes defaults to 32 and must be a canonical positive decimal integer.
+# Each random byte is represented by exactly two hexadecimal characters:
+#
+#   randh      -> 32 random bytes -> 64 hexadecimal characters
+#   randh 16   -> 16 random bytes -> 32 hexadecimal characters
+#   randh 1    ->  1 random byte  ->  2 hexadecimal characters
+#
+# Returns 2 for invalid arguments and otherwise returns the status of
+# openssl rand.
 
-#------------------------------------------------------------------------------
-
-# randh $n
-# generates a POSIX compliant random hex string of $n characters (NB each hex digit is represented by 2 ascii characters)
 randh()
 {
-  if [ -z "$1" ] || [ "$1" -ne "$1" ]
+  [ "$#" -le "1" ] || return 2
+
+  if [ "$#" -eq "0" ]
   then
     set -- "32"
   fi
+
+  [ -n "$1" ] || return 2
+  [ "$1" = "${1%%[!0123456789]*}" ] || return 2
+  [ "$1" = "${1#0}" ] || return 2
+  [ "$1" -gt "0" ] 2>/dev/null || return 2
 
   openssl rand -hex "$1"
 }
 
 #------------------------------------------------------------------------------
 
-# randstr $n
-# generates a POSIX compliant random base64 string of $n characters
+# rand64 [bytes]
+#
+# Generates cryptographically secure random bytes and writes their Base64
+# representation as a single line followed by a newline.
+#
+# bytes defaults to 32 and must be a canonical positive decimal integer.
+# The output contains exactly 4 * ceil(bytes / 3) Base64 characters,
+# including any '=' padding:
+#
+#   rand64      -> 32 random bytes -> 44 Base64 characters
+#   rand64 3    ->  3 random bytes ->  4 Base64 characters
+#   rand64 1    ->  1 random byte  ->  4 Base64 characters
+#
+# Returns 2 for invalid arguments and 1 if random generation or output
+# normalization fails.
+
 rand64()
-{
-  if [ -z "$1" ] || [ "$1" -ne "$1" ]
+(
+  [ "$#" -le "1" ] || return 2
+
+  if [ "$#" -eq "0" ]
   then
     set -- "32"
   fi
 
-  # openssl rand -base64 "$1"
-  openssl rand -base64 "$1" | tr -d '\n'; echo ""
-}
+  [ -n "$1" ] || return 2
+  [ "$1" = "${1%%[!0123456789]*}" ] || return 2
+  [ "$1" = "${1#0}" ] || return 2
+  [ "$1" -gt "0" ] 2>/dev/null || return 2
+
+  _rand64_output="$(openssl rand -base64 "$1")" || return 1
+
+  _rand64_output="$(
+    printf '%s' "$_rand64_output" |
+      tr -d '\012'
+  )" || return 1
+
+  printf '%s\n' "$_rand64_output"
+)
 
 #------------------------------------------------------------------------------
 
-# randstr $n
-# generates a POSIX compliant random string of $n characters
-# randstr()
-# {
-#   if [ -z "$1" ] || [ "$1" -ne "$1" ]
-#   then
-#     set -- "32"
-#   fi
+# randstr [characters]
 #
-#   openssl rand -hex "$1" | openssl enc -A -base64; echo ""
-# }
+# Generates a cryptographically secure random string using only characters
+# from the RFC 4648 Base64URL alphabet:
+#
+#   A-Z a-z 0-9 _ -
+#
+# The output contains exactly the requested number of characters followed by
+# a newline. characters defaults to 32 and must be a canonical positive
+# decimal integer.
+#
+# The function generates random input in complete 3-byte blocks, so every
+# Base64 character is derived from exactly 6 uniformly distributed random
+# bits. Standard Base64 '+' and '/' are translated to Base64URL '-' and '_',
+# then the result is truncated to the requested length. No modulo operation
+# or rejection mapping is used, so every output character remains uniformly
+# distributed over the 64-character alphabet.
+#
+# Each output character therefore carries exactly 6 bits of entropy:
+#
+#   randstr       -> 32 characters -> 192 bits
+#   randstr 16    -> 16 characters ->  96 bits
+#   randstr 64    -> 64 characters -> 384 bits
+#
+# The result contains no whitespace, '/', '+', or '=' padding and is therefore
+# suitable for tokens, filenames and URL components without further escaping.
+#
+# This is a random string drawn from the Base64URL alphabet; for arbitrary
+# lengths it is not necessarily a decodable Base64URL encoding of a byte
+# sequence.
+#
+# Returns 2 for invalid arguments and 1 if secure random generation or output
+# transformation fails.
+
+randstr()
+(
+  [ "$#" -le "1" ] || return 2
+
+  if [ "$#" -eq "0" ]
+  then
+    set -- "32"
+  fi
+
+  [ -n "$1" ] || return 2
+  [ "$1" = "${1%%[!0123456789]*}" ] || return 2
+  [ "$1" = "${1#0}" ] || return 2
+  [ "$1" -gt "0" ] 2>/dev/null || return 2
+
+  _randstr_blocks="$((($1 + 3) / 4))"
+  _randstr_bytes="$((_randstr_blocks * 3))"
+
+  _randstr_output="$(rand64 "$_randstr_bytes")" || return 1
+
+  _randstr_output="$(
+    printf '%s' "$_randstr_output" |
+      tr '/+' '_-'
+  )" || return 1
+
+  [ "${#_randstr_output}" -eq "$((_randstr_blocks * 4))" ] || return 1
+
+  _randstr_remainder="$(($1 % 4))"
+
+  if [ "$_randstr_remainder" -eq "1" ]
+  then
+    _randstr_output="${_randstr_output%???}"
+  elif [ "$_randstr_remainder" -eq "2" ]
+  then
+    _randstr_output="${_randstr_output%??}"
+  elif [ "$_randstr_remainder" -eq "3" ]
+  then
+    _randstr_output="${_randstr_output%?}"
+  fi
+
+  [ "${#_randstr_output}" -eq "$1" ] || return 1
+
+  [ "$_randstr_output" = \
+    "${_randstr_output%%[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-]*}" ] ||
+    return 1
+
+  printf '%s\n' "$_randstr_output"
+)
 
 #------------------------------------------------------------------------------
 
-# generate random number of specified number of digits.
-# NB is not POSIX compliant because uses /dev/urandom and may not guarrantee enough entropy for security uses
+# randu [digits]
+#
+# Generates exactly the requested number of uniformly distributed decimal
+# digits using the same cryptographically secure random source as randh.
+#
+# digits defaults to 4 and must be a canonical positive decimal integer.
+# Leading zeroes are allowed because the result is a fixed-length digit
+# string rather than a mathematical integer:
+#
+#   randu      -> e.g. 0387
+#   randu 8    -> e.g. 59102743
+#   randu 1    -> e.g. 7
+#
+# Hexadecimal digits a-f are discarded. Since every hexadecimal digit is
+# uniformly distributed over 0-f, conditioning on the accepted set 0-9
+# leaves every decimal digit with the same probability.
+#
+# Returns 2 for invalid arguments and 1 if random generation fails.
+
 randu()
-{
-  if [ -z "$1" ] || [ "$1" -ne "$1" ]
+(
+  [ "$#" -le "1" ] || return 2
+
+  if [ "$#" -eq "0" ]
   then
     set -- "4"
   fi
 
-  tr -dc '[:digit:]' < /dev/urandom | fold -w "$1" | head -n1
-  # od -An -N4 -tu4 /dev/urandom | tr -d ' '
-  # od -An -N2 -d /dev/urandom
-}
+  [ -n "$1" ] || return 2
+  [ "$1" = "${1%%[!0123456789]*}" ] || return 2
+  [ "$1" = "${1#0}" ] || return 2
+  [ "$1" -gt "0" ] 2>/dev/null || return 2
 
-#------------------------------------------------------------------------------
+  _randu_digits=""
 
-# generate random number of specified number of digits.
-# NB is not POSIX compliant because uses /dev/random. should guarrantee enough entropy for security uses, but may block
-# rands()
-# {
-#   if [ -z "$1" ] || [ "$1" -ne "$1" ]
-#   then
-#     set -- "4"
-#   fi
-#
-#   tr -dc '[:digit:]' < /dev/random | fold -w "$1" | head -n1
-# }
+  while [ "${#_randu_digits}" -lt "$1" ]
+  do
+    _randu_chunk="$(randh "$1")" || return 1
+
+    _randu_chunk="$(
+      printf '%s' "$_randu_chunk" |
+        tr -cd '0123456789'
+    )" || return 1
+
+    _randu_digits="$_randu_digits$_randu_chunk"
+  done
+
+  printf '%.*s\n' "$1" "$_randu_digits"
+)
 
 #------------------------------------------------------------------------------
 
