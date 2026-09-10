@@ -107,7 +107,7 @@ rsudo_core()
     RSUDO_PASSWORD_ENCODED="$(echo "$RSUDO_PASSWORD" | RSUDO_TOKEN="$RSUDO_TOKEN" openssl enc -e -aes-256-cbc -pbkdf2 -pass "env:RSUDO_TOKEN" | openssl enc -e -A -base64)"
 
     RSUDO_DAEMON_COMMANDS="$(cat << EOF
-trap "rm -f '$RSUDO_FIFO'" INT QUIT TERM HUP PIPE ABRT TSTP EXIT
+trap "rm -f '$RSUDO_REMOTE_FIFO'" INT QUIT TERM HUP PIPE ABRT TSTP EXIT
 mkfifo "$RSUDO_REMOTE_FIFO"
 chmod 600 "$RSUDO_REMOTE_FIFO"
 echo "READY" > "$RSUDO_REMOTE_FIFO"
