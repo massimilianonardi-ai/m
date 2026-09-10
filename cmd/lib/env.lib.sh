@@ -271,7 +271,7 @@ env_read()
   do
 # echo "arg1='$1'"; echo "arg2='$2'"; echo "arg3='$3'"; read x
     eval "$(shift && set -- $1 && echo "$1")=\"$(shift 2 && eval set -- $1 && echo "$1")\""
-    set -- "$(set -- $2 && shift && echo "$#")" "$(set -- $2 && shift && echo "$@")" "$(eval set -- $3 && [ "$#" -gt "0" ] && shift && saveargs "$@")"
+    set -- "$(set -- $2 && shift && echo "$#")" "$(set -- $2 && shift && echo "$@")" "$(eval set -- $3 && [ "$#" -gt "0" ] && shift && quote "$@")"
   done
 }
 
