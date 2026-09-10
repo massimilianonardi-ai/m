@@ -1,21 +1,46 @@
-#!/bin/sh
-
-#------------------------------------------------------------------------------
-
-quote()
-{
-  if [ -z "$1" ]
-  then
-    printf "''"
-  fi
-
-  # printf %s\\n "$1" | sed "s/'/'\\\\''/g;1s/^/'/;\$s/\$/'/"
-  printf "%s" "$1" | sed "s/'/'\\\\''/g;1s/^/'/;\$s/\$/'/"
-}
-
 # current_args="$(saveargs "$@")"
 # set -- foo bar baz boo
 # eval "set -- $current_args"
+
+quote()
+{
+  if [ "$#" -ne 1 ]
+  then
+    return 1
+  fi
+
+  (
+    _quote_arg="$1"
+
+    printf "%s" "'" || exit 1
+
+    while [ "$_quote_arg" != "${_quote_arg#*"'"}" ]
+    do
+      _quote_part="${_quote_arg%%"'"*}"
+
+      printf "%s%s" "$_quote_part" "'\\''" || exit 1
+
+      _quote_arg="${_quote_arg#*"'"}"
+    done
+
+    printf "%s%s" "$_quote_arg" "'" || exit 1
+  )
+}
+
+quoteargs()
+{
+  while [ "$#" -gt 0 ]
+  do
+    quote "$1" || return 1
+
+    shift
+
+    if [ "$#" -gt 0 ]
+    then
+      printf "%s" " " || return 1
+    fi
+  done
+}
 
 saveargs()
 {
@@ -46,5 +71,3 @@ saveargs()
     done
   )
 }
-
-#-------------------------------------------------------------------------------
