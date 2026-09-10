@@ -26,10 +26,7 @@ ipc_create()
 
   _ipc_base="${1:-${TMPDIR:-/tmp}}"
 
-  case "$_ipc_base" in
-    /*) : ;;
-    *) return 1 ;;
-  esac
+  [ "${_ipc_base#/}" != "$_ipc_base" ] || return 1
 
   [ -d "$_ipc_base" ] && [ -w "$_ipc_base" ] || return 1
 
@@ -41,10 +38,7 @@ ipc_create()
     _ipc_token="$(randh 16)" || return 1
 
     [ "${#_ipc_token}" -eq "32" ] || return 1
-
-    case "$_ipc_token" in
-      *[!0123456789abcdef]*) return 1 ;;
-    esac
+    [ "$_ipc_token" = "${_ipc_token%%[!0123456789abcdef]*}" ] || return 1
 
     _ipc_dir="${_ipc_base%/}/ipc.$$.$_ipc_token"
 
@@ -246,10 +240,7 @@ ipc_destroy()
 
   _ipc_dir="$1"
 
-  case "$_ipc_dir" in
-    /*) : ;;
-    *) return 1 ;;
-  esac
+  [ "${_ipc_dir#/}" != "$_ipc_dir" ] || return 1
 
   [ -d "$_ipc_dir" ] || return 0
 
