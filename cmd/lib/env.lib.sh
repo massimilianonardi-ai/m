@@ -92,7 +92,7 @@ EOF
 
 #-------------------------------------------------------------------------------
 
-env_list()
+env_list_single_quote()
 {
   if [ -z "$*" ]
   then
@@ -100,6 +100,125 @@ env_list()
   else
     set | sed '/='\''/,/'\''$/ {s/='\''.*//p; /.*/d}' | grep -e "$@"
   fi
+}
+
+#-------------------------------------------------------------------------------
+
+env_list()
+{
+  if [ "$#" -gt "1" ]
+  then
+    return 1
+  fi
+
+  if [ "$#" -eq "0" ]
+  then
+    env_list_all
+  else
+    env_list_all | grep -e "$1"
+  fi
+}
+
+#-------------------------------------------------------------------------------
+
+# full POSIX compliant list of all environment variables (NB safe against bash returning functions)
+env_list_all()
+{
+  set | LC_ALL=C awk '
+    BEGIN {
+      sq = sprintf("%c", 39)
+      mode = ""
+      escaped = 0
+      boundary = 1
+    }
+
+    {
+      if (boundary) {
+        p = index($0, "=")
+
+        if (p == 0)
+          exit
+
+        print substr($0, 1, p - 1)
+      }
+
+      for (i = 1; i <= length($0); i++) {
+        c = substr($0, i, 1)
+
+        if (mode == "single") {
+          if (c == sq)
+            mode = ""
+
+          continue
+        }
+
+        if (mode == "dollar-single") {
+          if (escaped) {
+            escaped = 0
+            continue
+          }
+
+          if (c == "\\") {
+            escaped = 1
+            continue
+          }
+
+          if (c == sq)
+            mode = ""
+
+          continue
+        }
+
+        if (mode == "double") {
+          if (escaped) {
+            escaped = 0
+            continue
+          }
+
+          if (c == "\\") {
+            escaped = 1
+            continue
+          }
+
+          if (c == "\"")
+            mode = ""
+
+          continue
+        }
+
+        if (escaped) {
+          escaped = 0
+          continue
+        }
+
+        if (c == "\\") {
+          escaped = 1
+          continue
+        }
+
+        if (c == "\"") {
+          mode = "double"
+          continue
+        }
+
+        if (c == "$" && substr($0, i + 1, 1) == sq) {
+          mode = "dollar-single"
+          i++
+          continue
+        }
+
+        if (c == sq)
+          mode = "single"
+      }
+
+      if (mode == "" && !escaped)
+        boundary = 1
+      else
+        boundary = 0
+
+      escaped = 0
+    }
+  '
 }
 
 #-------------------------------------------------------------------------------

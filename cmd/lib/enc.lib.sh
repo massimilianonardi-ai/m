@@ -479,6 +479,207 @@ decode()
 
 #------------------------------------------------------------------------------
 
+# encodes stdin to stdout using GNU GnuPG symmetric encryption
+#
+# Requires GNU gpg in PATH. If gpg is not available, returns 1.
+#
+# ENC_PASS may provide the passphrase. If ENC_PASS is unset or empty, the
+# passphrase is read twice from /dev/tty using _enc_password_read().
+#
+# The plaintext is encrypted as an ASCII-armored OpenPGP message using:
+#
+#   AES-256
+#   iterated-and-salted S2K
+#   SHA-256 for S2K
+#   maximum OpenPGP S2K count (65011712)
+#   no compression
+#   OpenPGP CFB+MDC integrity protection
+#
+# The passphrase is supplied to gpg through a dedicated file descriptor and
+# never appears in the gpg command line.
+#
+# Passphrases containing newline characters are rejected because
+# --passphrase-fd reads only the first line.
+#
+# Returns:
+#
+#   0  success
+#   1  gpg unavailable, passphrase/input/crypto/runtime error
+#   2  invalid function arguments
+
+encode_gpg_legacy()
+(
+  set +x
+
+  [ "$#" -eq "0" ] || return 2
+
+  command -v gpg >/dev/null 2>&1 || return 1
+
+  if [ "${ENC_PASS+x}" != "x" ] || [ -z "$ENC_PASS" ]
+  then
+    ENC_PASS="$(_enc_password_read "Encryption password: ")" || return 1
+    [ -n "$ENC_PASS" ] || return 1
+
+    _enc_password_confirm="$(
+      _enc_password_read "Verify encryption password: "
+    )" || return 1
+
+    [ "$ENC_PASS" = "$_enc_password_confirm" ] || return 1
+
+    unset _enc_password_confirm
+  fi
+
+  _enc_password="$ENC_PASS"
+  unset ENC_PASS
+
+  _enc_password_lines="$(
+    printf '%s\n' "$_enc_password" |
+      awk 'END { print NR }'
+  )" || return 1
+
+  [ "$_enc_password_lines" -eq "1" ] || return 1
+
+  # Preserve plaintext stdin on fd 3. The pipeline supplies the passphrase
+  # to gpg on fd 4 while fd 0 is restored to the original plaintext stream.
+  exec 3<&0
+
+  printf '%s\n' "$_enc_password" |
+    gpg \
+      --batch \
+      --no-tty \
+      --quiet \
+      --pinentry-mode loopback \
+      --passphrase-fd 4 \
+      --no-symkey-cache \
+      --openpgp \
+      --cipher-algo AES256 \
+      --s2k-mode 3 \
+      --s2k-digest-algo SHA256 \
+      --s2k-count 65011712 \
+      --no-compress \
+      --armor \
+      --symmetric \
+      --output - \
+      4<&0 0<&3 3<&- ||
+    return 1
+)
+
+#------------------------------------------------------------------------------
+
+# decodes an ASCII-armored OpenPGP message from stdin to stdout using GNU GnuPG
+#
+# Requires GNU gpg in PATH. If gpg is not available, returns 1.
+#
+# ENC_PASS may provide the passphrase. If ENC_PASS is unset or empty, the
+# passphrase is read from /dev/tty using _enc_password_read().
+#
+# The complete ASCII-armored ciphertext is buffered in shell memory so that
+# it can be processed twice without temporary files:
+#
+#   1. gpg decrypts the message completely to /dev/null, verifying the
+#      password and OpenPGP integrity protection without exposing plaintext;
+#
+#   2. only after the first pass succeeds, the identical immutable ciphertext
+#      is decrypted again and plaintext is written to stdout.
+#
+# Two passes are deliberate. GNU gpg may stream plaintext before detecting an
+# MDC failure at the end of a damaged message. The verification pass prevents
+# unauthenticated plaintext from reaching the caller.
+#
+# The passphrase is supplied to gpg through a dedicated file descriptor and
+# never appears in the gpg command line.
+#
+# Passphrases containing newline characters are rejected because
+# --passphrase-fd reads only the first line.
+#
+# Input must be the ASCII-armored format produced by encode(), because shell
+# variables cannot safely contain arbitrary binary data.
+#
+# Returns:
+#
+#   0  success
+#   1  gpg unavailable, passphrase/input/authentication/crypto/runtime error
+#   2  invalid function arguments
+
+decode_gpg_legacy()
+(
+  set +x
+
+  [ "$#" -eq "0" ] || return 2
+
+  command -v gpg >/dev/null 2>&1 || return 1
+
+  if [ "${ENC_PASS+x}" != "x" ] || [ -z "$ENC_PASS" ]
+  then
+    ENC_PASS="$(_enc_password_read "Decryption password: ")" || return 1
+    [ -n "$ENC_PASS" ] || return 1
+  fi
+
+  _enc_password="$ENC_PASS"
+  unset ENC_PASS
+
+  _enc_password_lines="$(
+    printf '%s\n' "$_enc_password" |
+      awk 'END { print NR }'
+  )" || return 1
+
+  [ "$_enc_password_lines" -eq "1" ] || return 1
+
+  # The sentinel preserves trailing newlines which command substitution
+  # would otherwise remove.
+  _enc_input="$(
+    cat || exit 1
+    printf '%s' "_ENC_GPG_INPUT_END_"
+  )" || return 1
+
+  if [ "$_enc_input" = "${_enc_input%_ENC_GPG_INPUT_END_}" ]
+  then
+    return 1
+  fi
+
+  _enc_input="${_enc_input%_ENC_GPG_INPUT_END_}"
+
+  [ -n "$_enc_input" ] || return 1
+
+  # First pass: authenticate the complete message without exposing plaintext.
+  printf '%s\n' "$_enc_password" |
+  (
+    exec 4<&0
+
+    printf '%s' "$_enc_input" |
+      gpg \
+        --batch \
+        --no-tty \
+        --quiet \
+        --pinentry-mode loopback \
+        --passphrase-fd 4 \
+        --no-symkey-cache \
+        --openpgp \
+        --decrypt \
+        --output -
+  ) > /dev/null || return 1
+
+  # Second pass: the exact same ciphertext has already been authenticated.
+  printf '%s\n' "$_enc_password" |
+  (
+    exec 4<&0
+
+    printf '%s' "$_enc_input" |
+      gpg \
+        --batch \
+        --no-tty \
+        --quiet \
+        --pinentry-mode loopback \
+        --passphrase-fd 4 \
+        --no-symkey-cache \
+        --openpgp \
+        --decrypt \
+        --output -
+  ) || return 1
+)
+
+#------------------------------------------------------------------------------
+
 # decodes file sourcing (executing) it into current shell script
 
 encoded_file_import()
