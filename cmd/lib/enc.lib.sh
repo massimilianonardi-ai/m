@@ -162,9 +162,7 @@ _enc_mac_key()
 
   [ "${#1}" -eq "16" ] || return 1
 
-  case "$1" in
-    *[!0123456789abcdef]*) return 1 ;;
-  esac
+  [ "$1" = "${1%%[!0123456789abcdef]*}" ] || return 1
 
   _enc_kdf_output="$(
     _ENC_MAC_PASS="ENC1-MAC:$2" \
@@ -181,20 +179,17 @@ _enc_mac_key()
 
   while IFS= read -r _enc_kdf_line
   do
-    case "$_enc_kdf_line" in
-      key=*)
-        _enc_mac_key="${_enc_kdf_line#key=}"
-      ;;
-    esac
+    if [ "$_enc_kdf_line" != "${_enc_kdf_line#key=}" ]
+    then
+      _enc_mac_key="${_enc_kdf_line#key=}"
+    fi
   done <<EOF_KDF
 $_enc_kdf_output
 EOF_KDF
 
   [ "${#_enc_mac_key}" -eq "64" ] || return 1
 
-  case "$_enc_mac_key" in
-    *[!0123456789ABCDEFabcdef]*) return 1 ;;
-  esac
+  [ "$_enc_mac_key" = "${_enc_mac_key%%[!0123456789ABCDEFabcdef]*}" ] || return 1
 
   printf '%s\n' "$_enc_mac_key"
 )
@@ -206,9 +201,7 @@ _enc_hmac()
   [ "$#" -eq "1" ] || return 2
   [ "${#1}" -eq "64" ] || return 1
 
-  case "$1" in
-    *[!0123456789ABCDEFabcdef]*) return 1 ;;
-  esac
+  [ "$1" = "${1%%[!0123456789ABCDEFabcdef]*}" ] || return 1
 
   _enc_hmac_output="$(
     openssl dgst -sha256 \
@@ -220,9 +213,7 @@ _enc_hmac()
 
   [ "${#_enc_hmac_tag}" -eq "64" ] || return 1
 
-  case "$_enc_hmac_tag" in
-    *[!0123456789abcdef]*) return 1 ;;
-  esac
+  [ "$_enc_hmac_tag" = "${_enc_hmac_tag%%[!0123456789abcdef]*}" ] || return 1
 
   printf '%s\n' "$_enc_hmac_tag"
 )
@@ -262,15 +253,12 @@ encode()
     printf '%s' '_ENC_BODY_END_'
   )" || return 1
 
-  case "$_enc_body" in
-    *_ENC_BODY_END_)
-      _enc_body="${_enc_body%_ENC_BODY_END_}"
-    ;;
+  if [ "$_enc_body" = "${_enc_body%_ENC_BODY_END_}" ]
+  then
+    return 1
+  fi
 
-    *)
-      return 1
-    ;;
-  esac
+  _enc_body="${_enc_body%_ENC_BODY_END_}"
 
   [ -n "$_enc_body" ] || return 1
 
@@ -278,9 +266,7 @@ encode()
 
   [ "${#_enc_mac_salt}" -eq "16" ] || return 1
 
-  case "$_enc_mac_salt" in
-    *[!0123456789abcdef]*) return 1 ;;
-  esac
+  [ "$_enc_mac_salt" = "${_enc_mac_salt%%[!0123456789abcdef]*}" ] || return 1
 
   _enc_mac_key="$(_enc_mac_key "$_enc_mac_salt" "$_enc_password")" || return 1
   _enc_tag="$(
@@ -329,49 +315,36 @@ decode()
     printf '%s' '_ENC_BODY_END_'
   )" || return 1
 
-  case "$_enc_body" in
-    *_ENC_BODY_END_)
-      _enc_body="${_enc_body%_ENC_BODY_END_}"
-    ;;
+  if [ "$_enc_body" = "${_enc_body%_ENC_BODY_END_}" ]
+  then
+    return 1
+  fi
 
-    *)
-      return 1
-    ;;
-  esac
+  _enc_body="${_enc_body%_ENC_BODY_END_}"
 
   [ "$_enc_magic" = "ENC1" ] || return 1
 
-  case "$_enc_salt_line" in
-    SALT:*)
-      _enc_mac_salt="${_enc_salt_line#SALT:}"
-    ;;
+  if [ "$_enc_salt_line" = "${_enc_salt_line#SALT:}" ]
+  then
+    return 1
+  fi
 
-    *)
-      return 1
-    ;;
-  esac
+  _enc_mac_salt="${_enc_salt_line#SALT:}"
 
   [ "${#_enc_mac_salt}" -eq "16" ] || return 1
 
-  case "$_enc_mac_salt" in
-    *[!0123456789abcdef]*) return 1 ;;
-  esac
+  [ "$_enc_mac_salt" = "${_enc_mac_salt%%[!0123456789abcdef]*}" ] || return 1
 
-  case "$_enc_tag_line" in
-    HMAC:*)
-      _enc_tag="${_enc_tag_line#HMAC:}"
-    ;;
+  if [ "$_enc_tag_line" = "${_enc_tag_line#HMAC:}" ]
+  then
+    return 1
+  fi
 
-    *)
-      return 1
-    ;;
-  esac
+  _enc_tag="${_enc_tag_line#HMAC:}"
 
   [ "${#_enc_tag}" -eq "64" ] || return 1
 
-  case "$_enc_tag" in
-    *[!0123456789abcdef]*) return 1 ;;
-  esac
+  [ "$_enc_tag" = "${_enc_tag%%[!0123456789abcdef]*}" ] || return 1
 
   [ -n "$_enc_body" ] || return 1
 
@@ -509,15 +482,27 @@ o2a()
 
     for _o2a_octet
     do
-      case "$_o2a_octet" in
-        [0-7]|[0-7][0-7]|[0123][0-7][0-7])
-          :
-        ;;
+      _o2a_length="${#_o2a_octet}"
 
-        *)
+      if [ "$_o2a_length" -lt "1" ] || [ "$_o2a_length" -gt "3" ]
+      then
+        return 1
+      fi
+
+      [ "$_o2a_octet" = "${_o2a_octet%%[!01234567]*}" ] || return 1
+
+      if [ "$_o2a_length" -eq "3" ]
+      then
+        _o2a_first="${_o2a_octet%??}"
+
+        if [ "$_o2a_first" != "0" ] &&
+           [ "$_o2a_first" != "1" ] &&
+           [ "$_o2a_first" != "2" ] &&
+           [ "$_o2a_first" != "3" ]
+        then
           return 1
-        ;;
-      esac
+        fi
+      fi
     done
 
     for _o2a_octet
