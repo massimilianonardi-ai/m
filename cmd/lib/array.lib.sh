@@ -9,6 +9,13 @@
 # array ARRAY_NAME rem INDEX
 # array ARRAY_NAME set NEW_VALUES...
 # array ARRAY_NAME unset
+#
+# ARRAY_NAME_TYPE, ARRAY_NAME_SIZE and ARRAY_NAME_INDEX variables are
+# opaque internal storage. Callers must not modify them directly.
+#
+# Operations which already need to traverse the complete array validate
+# that all declared slots exist before using them. Constant-time operations
+# intentionally avoid a full O(n) storage scan.
 
 
 . arg.lib.sh
@@ -114,7 +121,7 @@ _array_destination_valid()
 
 # Return:
 #
-#   0  valid array
+#   0  valid array metadata
 #   1  array does not exist
 #   2  inconsistent array metadata
 
@@ -137,6 +144,9 @@ _array_state()
   return 0
 }
 
+
+# Full O(n) storage validation. Use only when the operation already needs
+# to traverse the complete declared array.
 
 _array_slots_valid()
 {
@@ -235,6 +245,9 @@ _array_destroy()
 
 _array_add()
 {
+  # Deliberately no full slot validation here: internal storage is opaque
+  # and append remains O(1).
+
   eval \
     "set -- \"\$1\" \"\$2\" \"\${${1}_SIZE}\""
 
