@@ -3,10 +3,10 @@
 #------------------------------------------------------------------------------
 
 # generates a POSIX compliant random number between 0 and 1 by the use of awk
-rand()
-{
-  echo "" | awk -v rseed=$RANDOM 'BEGIN{srand(rseed);}{print rand(); exit}'
-}
+# rand()
+# {
+#   echo "" | awk -v rseed=$RANDOM 'BEGIN{srand(rseed);}{print rand(); exit}'
+# }
 
 #------------------------------------------------------------------------------
 
@@ -15,23 +15,23 @@ rand()
 # randint $min $max
 # randint $max - (min=0)
 # randint - (min=0, max=255)
-randint()
-{
-  if [ "$#" = "0" ]
-  then
-    set -- "0" "255"
-  elif [ "$#" = "1" ]
-  then
-    set -- "0" "$1"
-  fi
-
-  if [ "$1" -ne "$1" ] || [ "$2" -ne "$2" ]
-  then
-    exit 1
-  fi
-
-  awk -v rseed=$RANDOM "BEGIN{srand(rseed); print int(rand()*($2-$1+1))+$1}"
-}
+# randint()
+# {
+#   if [ "$#" = "0" ]
+#   then
+#     set -- "0" "255"
+#   elif [ "$#" = "1" ]
+#   then
+#     set -- "0" "$1"
+#   fi
+#
+#   if [ "$1" -ne "$1" ] || [ "$2" -ne "$2" ]
+#   then
+#     exit 1
+#   fi
+#
+#   awk -v rseed=$RANDOM "BEGIN{srand(rseed); print int(rand()*($2-$1+1))+$1}"
+# }
 
 #------------------------------------------------------------------------------
 
@@ -66,15 +66,15 @@ rand64()
 
 # randstr $n
 # generates a POSIX compliant random string of $n characters
-randstr()
-{
-  if [ -z "$1" ] || [ "$1" -ne "$1" ]
-  then
-    set -- "32"
-  fi
-
-  openssl rand -hex "$1" | openssl enc -A -base64; echo ""
-}
+# randstr()
+# {
+#   if [ -z "$1" ] || [ "$1" -ne "$1" ]
+#   then
+#     set -- "32"
+#   fi
+#
+#   openssl rand -hex "$1" | openssl enc -A -base64; echo ""
+# }
 
 #------------------------------------------------------------------------------
 
@@ -96,15 +96,15 @@ randu()
 
 # generate random number of specified number of digits.
 # NB is not POSIX compliant because uses /dev/random. should guarrantee enough entropy for security uses, but may block
-rands()
-{
-  if [ -z "$1" ] || [ "$1" -ne "$1" ]
-  then
-    set -- "4"
-  fi
-
-  tr -dc '[:digit:]' < /dev/random | fold -w "$1" | head -n1
-}
+# rands()
+# {
+#   if [ -z "$1" ] || [ "$1" -ne "$1" ]
+#   then
+#     set -- "4"
+#   fi
+#
+#   tr -dc '[:digit:]' < /dev/random | fold -w "$1" | head -n1
+# }
 
 #------------------------------------------------------------------------------
 
@@ -467,7 +467,7 @@ a2o()
 o2a()
 {
   (
-    IFS=' 	
+    IFS='
 '
     set -f
 
