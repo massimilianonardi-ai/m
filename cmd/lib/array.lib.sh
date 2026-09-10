@@ -81,7 +81,32 @@ _array_destination_valid()
     "${1}_TYPE"|"${1}_SIZE"|"${1}_"[0123456789]*)
       return 1
     ;;
+
+    *_TYPE)
+      set -- "$1" "$2" "${2%_TYPE}"
+    ;;
+
+    *_SIZE)
+      set -- "$1" "$2" "${2%_SIZE}"
+    ;;
+
+    *_*)
+      set -- "$1" "$2" "${2%_*}" "${2##*_}"
+
+      _array_uint_valid "$4" || return 0
+
+      set -- "$1" "$2" "$3"
+    ;;
+
+    *)
+      return 0
+    ;;
   esac
+
+  _array_name_valid "$3" || return 0
+  _array_var_is_set "${3}_TYPE" || return 0
+
+  eval "[ \"\${${3}_TYPE}\" = \"array\" ]" && return 1
 
   return 0
 }
@@ -95,9 +120,7 @@ _array_destination_valid()
 
 _array_state()
 {
-  _array_var_is_set "${1}_TYPE"
-
-  if [ "$?" -ne "0" ]
+  if ! _array_var_is_set "${1}_TYPE"
   then
     _array_var_is_set "${1}_SIZE" && return 2
     return 1
@@ -356,10 +379,8 @@ _array_set()
   # If the array grows, verify first that every newly required
   # slot is free.
 
-  eval \
+  if eval \
     "[ \"\${$(($# - 1))}\" -gt \"\${$#}\" ]"
-
-  if [ "$?" -eq "0" ]
   then
     eval \
       "_array_range_clear \
@@ -406,49 +427,48 @@ array()
 
   _array_name_valid "$1" || return 2
 
-  _array_state "$1"
+  if _array_state "$1"
+  then
+    # Preserve the historical behaviour:
+    #
+    #   array NAME
+    #
+    # resets an existing array.
 
-  case "$?" in
-    0)
-      # Preserve the historical behaviour:
-      #
-      #   array NAME
-      #
-      # resets an existing array.
+    if [ "$#" -eq "1" ]
+    then
+      _array_reset "$1"
+      return "$?"
+    fi
+  else
+    case "$?" in
+      1)
+        # A missing array can only be created with:
+        #
+        #   array NAME
 
-      if [ "$#" -eq "1" ]
-      then
-        _array_reset "$1"
-        return "$?"
-      fi
-    ;;
-
-    1)
-      # A missing array can only be created with:
-      #
-      #   array NAME
-
-      if [ "$#" -eq "1" ]
-      then
-        _array_var_set "${1}_TYPE" "array" ||
-          return 1
-
-        if ! _array_var_set "${1}_SIZE" "0"
+        if [ "$#" -eq "1" ]
         then
-          unset "${1}_TYPE"
-          return 1
+          _array_var_set "${1}_TYPE" "array" ||
+            return 1
+
+          if ! _array_var_set "${1}_SIZE" "0"
+          then
+            unset "${1}_TYPE"
+            return 1
+          fi
+
+          return 0
         fi
 
-        return 0
-      fi
+        return 1
+      ;;
 
-      return 1
-    ;;
-
-    *)
-      return 1
-    ;;
-  esac
+      *)
+        return 1
+      ;;
+    esac
+  fi
 
 
   case "$2" in
