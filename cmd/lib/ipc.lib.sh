@@ -4,8 +4,20 @@
 
 #-------------------------------------------------------------------------------
 
+_ipc_fd_valid()
+{
+  [ "$#" -eq "1" ] || return 2
+
+  case "$1" in
+    [3-9]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+#-------------------------------------------------------------------------------
+
 # ipc_create [base_dir]
-# creates a private IPC channel and prints its directory path
+# creates a private duplex IPC channel and prints its directory path
 ipc_create()
 (
   set +x
@@ -38,24 +50,26 @@ ipc_create()
 
     if mkdir "$_ipc_dir" 2>/dev/null
     then
-      _ipc_fifo="$_ipc_dir/data"
+      _ipc_ab="$_ipc_dir/a-to-b"
+      _ipc_ba="$_ipc_dir/b-to-a"
 
-      if ! mkfifo "$_ipc_fifo" 2>/dev/null
+      if ! mkfifo "$_ipc_ab" "$_ipc_ba" 2>/dev/null
       then
+        rm -f "$_ipc_ab" "$_ipc_ba"
         rmdir "$_ipc_dir" 2>/dev/null || :
         return 1
       fi
 
       chmod 700 "$_ipc_dir" ||
       {
-        rm -f "$_ipc_fifo"
+        rm -f "$_ipc_ab" "$_ipc_ba"
         rmdir "$_ipc_dir" 2>/dev/null || :
         return 1
       }
 
-      chmod 600 "$_ipc_fifo" ||
+      chmod 600 "$_ipc_ab" "$_ipc_ba" ||
       {
-        rm -f "$_ipc_fifo"
+        rm -f "$_ipc_ab" "$_ipc_ba"
         rmdir "$_ipc_dir" 2>/dev/null || :
         return 1
       }
@@ -72,44 +86,130 @@ ipc_create()
 
 #-------------------------------------------------------------------------------
 
-# ipc_write channel [data]
-# with data writes that shell string exactly; without data copies stdin
+# ipc_open channel endpoint read_fd write_fd
+# endpoint must be "a" or "b"; read_fd and write_fd must be different FDs 3..9
+# blocks until both endpoints are connected; endpoint a then removes the FIFO paths
+ipc_open()
+{
+  [ "$#" -eq "4" ] || return 2
+
+  _ipc_dir="$1"
+  _ipc_endpoint="$2"
+  _ipc_read_fd="$3"
+  _ipc_write_fd="$4"
+
+  _ipc_fd_valid "$_ipc_read_fd" || return 1
+  _ipc_fd_valid "$_ipc_write_fd" || return 1
+  [ "$_ipc_read_fd" != "$_ipc_write_fd" ] || return 1
+
+  [ -d "$_ipc_dir" ] || return 1
+
+  _ipc_ab="$_ipc_dir/a-to-b"
+  _ipc_ba="$_ipc_dir/b-to-a"
+
+  [ -p "$_ipc_ab" ] && [ -p "$_ipc_ba" ] || return 1
+
+  case "$_ipc_endpoint" in
+    a)
+      _ipc_read_fifo="$_ipc_ba"
+      _ipc_write_fifo="$_ipc_ab"
+
+      eval "exec ${_ipc_write_fd}> \"\$_ipc_write_fifo\"" || return 1
+
+      if ! eval "exec ${_ipc_read_fd}< \"\$_ipc_read_fifo\""
+      then
+        eval "exec ${_ipc_write_fd}>&-"
+        return 1
+      fi
+
+      if ! rm -f "$_ipc_ab" "$_ipc_ba" || ! rmdir "$_ipc_dir"
+      then
+        eval "exec ${_ipc_read_fd}<&-"
+        eval "exec ${_ipc_write_fd}>&-"
+        return 1
+      fi
+    ;;
+
+    b)
+      _ipc_read_fifo="$_ipc_ab"
+      _ipc_write_fifo="$_ipc_ba"
+
+      eval "exec ${_ipc_read_fd}< \"\$_ipc_read_fifo\"" || return 1
+
+      if ! eval "exec ${_ipc_write_fd}> \"\$_ipc_write_fifo\""
+      then
+        eval "exec ${_ipc_read_fd}<&-"
+        return 1
+      fi
+    ;;
+
+    *)
+      return 1
+    ;;
+  esac
+
+  unset _ipc_dir
+  unset _ipc_endpoint
+  unset _ipc_read_fd
+  unset _ipc_write_fd
+  unset _ipc_ab
+  unset _ipc_ba
+  unset _ipc_read_fifo
+  unset _ipc_write_fifo
+
+  return 0
+}
+
+#-------------------------------------------------------------------------------
+
+# ipc_write write_fd data
+# writes one newline-delimited shell string record
 ipc_write()
 (
   set +x
 
-  [ "$#" -eq "1" ] || [ "$#" -eq "2" ] || return 2
+  [ "$#" -eq "2" ] || return 2
+  _ipc_fd_valid "$1" || return 1
 
-  _ipc_dir="$1"
-  _ipc_fifo="$_ipc_dir/data"
+  _ipc_fd="$1"
 
-  [ -d "$_ipc_dir" ] && [ -p "$_ipc_fifo" ] || return 1
-
-  if [ "$#" -eq "2" ]
-  then
-    printf '%s' "$2" > "$_ipc_fifo"
-  else
-    cat > "$_ipc_fifo"
-  fi
+  eval "exec 1>&${_ipc_fd}" || return 1
+  printf '%s\n' "$2"
 )
 
 #-------------------------------------------------------------------------------
 
-# ipc_read channel
-# copies one writer session from the channel to stdout
+# ipc_read read_fd
+# reads one newline-delimited shell string record and writes it to stdout
 ipc_read()
 (
   set +x
 
   [ "$#" -eq "1" ] || return 2
+  _ipc_fd_valid "$1" || return 1
 
-  _ipc_dir="$1"
-  _ipc_fifo="$_ipc_dir/data"
+  _ipc_fd="$1"
 
-  [ -d "$_ipc_dir" ] && [ -p "$_ipc_fifo" ] || return 1
-
-  cat < "$_ipc_fifo"
+  eval "exec 0<&${_ipc_fd}" || return 1
+  IFS= read -r _ipc_data || return 1
+  printf '%s' "$_ipc_data"
 )
+
+#-------------------------------------------------------------------------------
+
+# ipc_close read_fd write_fd
+# closes both ends of an open IPC endpoint
+ipc_close()
+{
+  [ "$#" -eq "2" ] || return 2
+
+  _ipc_fd_valid "$1" || return 1
+  _ipc_fd_valid "$2" || return 1
+  [ "$1" != "$2" ] || return 1
+
+  eval "exec $1<&-" || return 1
+  eval "exec $2>&-" || return 1
+}
 
 #-------------------------------------------------------------------------------
 
@@ -137,7 +237,7 @@ ipc_cancel()
 #-------------------------------------------------------------------------------
 
 # ipc_destroy channel
-# removes only the channel FIFO and its now-empty private directory
+# removes a channel that has not yet been fully opened
 ipc_destroy()
 (
   set +x
@@ -151,15 +251,19 @@ ipc_destroy()
     *) return 1 ;;
   esac
 
-  if [ -p "$_ipc_dir/data" ]
+  [ -d "$_ipc_dir" ] || return 0
+
+  if [ -p "$_ipc_dir/a-to-b" ]
   then
-    rm -f "$_ipc_dir/data" || return 1
+    rm -f "$_ipc_dir/a-to-b" || return 1
   fi
 
-  if [ -d "$_ipc_dir" ]
+  if [ -p "$_ipc_dir/b-to-a" ]
   then
-    rmdir "$_ipc_dir" || return 1
+    rm -f "$_ipc_dir/b-to-a" || return 1
   fi
+
+  rmdir "$_ipc_dir"
 )
 
 #-------------------------------------------------------------------------------
