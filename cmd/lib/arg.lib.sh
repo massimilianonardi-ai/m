@@ -2,6 +2,8 @@
 # set -- foo bar baz boo
 # eval "set -- $current_args"
 
+# TODO evaluate the decision to use only one function with name "quote" that uses the current "saveargs", because: quote "$1" == saveargs "$1"
+
 quote()
 {
   if [ "$#" -ne 1 ]
@@ -40,6 +42,13 @@ quoteargs()
       printf "%s" " " || return 1
     fi
   done
+}
+
+quotearg()
+{
+  [ "$#" -eq 1 ] || return 1
+
+  saveargs "$1"
 }
 
 saveargs()
