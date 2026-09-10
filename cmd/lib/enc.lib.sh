@@ -211,40 +211,56 @@ encoded_file_edit()
 
 #------------------------------------------------------------------------------
 
-# convert string from ascii to octal
+# converts bytes to whitespace-separated 3-digit octal octets
+# with no arguments reads stdin, otherwise encodes the concatenated arguments
 
 a2o()
 {
-  if [ -z "$*" ]
+  if [ "$#" -eq "0" ]
   then
-    od -A n -b | tr -d '\t\r\n'
+    od -A n -t o1
   else
-    while [ "$#" -gt "0" ]
-    do
-      printf "$1" | od -A n -b | tr -d '\t\r\n'
-      shift
-    done
+    printf '%s' "$@" | od -A n -t o1
   fi
 }
 
-# convert string from octal to ascii
+# converts whitespace-separated octal octets to bytes
+# with no arguments reads stdin; accepted octets are 0..377
 
 o2a()
 {
-  if [ -z "$*" ]
-  then
-    set -- $(cat)
-    # tr ' ' '\n' | xargs -I % printf "\\%"
-  elif [ "$#" = "1" ]
-  then
-    set -- $@
-  fi
+  (
+    IFS=' 	
+'
+    set -f
 
-  while [ "$#" -gt "0" ]
-  do
-    printf "\\$1"
-    shift
-  done
+    if [ "$#" -eq "0" ]
+    then
+      _o2a_input="$(cat)" || return 1
+    else
+      _o2a_input="$*"
+    fi
+
+    set -- $_o2a_input
+
+    for _o2a_octet
+    do
+      case "$_o2a_octet" in
+        [0-7]|[0-7][0-7]|[0123][0-7][0-7])
+          :
+        ;;
+
+        *)
+          return 1
+        ;;
+      esac
+    done
+
+    for _o2a_octet
+    do
+      printf '%b' "\\0$_o2a_octet" || return 1
+    done
+  )
 }
 
 #-------------------------------------------------------------------------------
