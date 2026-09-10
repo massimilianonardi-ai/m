@@ -108,31 +108,328 @@ rands()
 
 #------------------------------------------------------------------------------
 
-# encodes stdin to stdout (password can be provided through environmental variable ENC_PASS)
+# authenticated password-based encryption envelope
+#
+# Format version 1:
+#
+#   ENC1
+#   SALT:<16 lowercase hex digits>
+#   HMAC:<64 lowercase hex digits>
+#   <OpenSSL base64 ciphertext>
+#
+# The ciphertext is AES-256-CBC encrypted with PBKDF2-HMAC-SHA256 using
+# 600000 iterations and OpenSSL's embedded random salt. The envelope payload
+# (magic, MAC salt and base64 ciphertext) is authenticated with HMAC-SHA256
+# before any plaintext is emitted. The MAC key is independently derived from
+# the password with PBKDF2-HMAC-SHA256, the envelope MAC salt and a fixed
+# domain-separation prefix.
+
+_enc_password_read()
+(
+  set +x
+
+  [ "$#" -eq "1" ] || return 2
+  [ -r "/dev/tty" ] && [ -w "/dev/tty" ] || return 1
+
+  _enc_tty_settings="$(stty -g < "/dev/tty")" || return 1
+
+  trap 'stty "$_enc_tty_settings" < "/dev/tty" >/dev/null 2>&1' 0
+  trap 'exit 1' HUP INT QUIT TERM
+
+  stty -echo < "/dev/tty" || return 1
+  printf '%s' "$1" > "/dev/tty" || return 1
+
+  IFS= read -r _enc_password < "/dev/tty"
+  _enc_read_status="$?"
+
+  stty "$_enc_tty_settings" < "/dev/tty" || return 1
+  printf '\n' > "/dev/tty" || return 1
+
+  [ "$_enc_read_status" -eq "0" ] || return 1
+
+  printf '%s' "$_enc_password"
+)
+
+_enc_tmp_create()
+(
+  set +x
+
+  [ "$#" -eq "0" ] || return 2
+
+  _enc_tmp_base="${TMPDIR:-/tmp}"
+
+  case "$_enc_tmp_base" in
+    /*) : ;;
+    *) return 1 ;;
+  esac
+
+  [ -d "$_enc_tmp_base" ] && [ -w "$_enc_tmp_base" ] || return 1
+
+  umask 077
+  _enc_tmp_try="0"
+
+  while [ "$_enc_tmp_try" -lt "10" ]
+  do
+    _enc_tmp_token="$(openssl rand -hex 16)" || return 1
+    _enc_tmp_path="${_enc_tmp_base%/}/enc.$$.$_enc_tmp_token"
+
+    if mkdir "$_enc_tmp_path" 2>/dev/null
+    then
+      printf '%s\n' "$_enc_tmp_path"
+      return 0
+    fi
+
+    _enc_tmp_try="$(($_enc_tmp_try + 1))"
+  done
+
+  return 1
+)
+
+_enc_mac_key()
+(
+  set +x
+
+  [ "$#" -eq "2" ] || return 2
+
+  [ "${#1}" -eq "16" ] || return 1
+
+  case "$1" in
+    *[!0123456789abcdef]*) return 1 ;;
+  esac
+
+  _enc_kdf_output="$(
+    _ENC_MAC_PASS="ENC1-MAC:$2" \
+      openssl enc -aes-256-cbc \
+        -pbkdf2 \
+        -iter 600000 \
+        -md sha256 \
+        -S "$1" \
+        -P \
+        -pass env:_ENC_MAC_PASS
+  )" || return 1
+
+  _enc_mac_key=""
+
+  while IFS= read -r _enc_kdf_line
+  do
+    case "$_enc_kdf_line" in
+      key=*)
+        _enc_mac_key="${_enc_kdf_line#key=}"
+      ;;
+    esac
+  done <<EOF_KDF
+$_enc_kdf_output
+EOF_KDF
+
+  [ "${#_enc_mac_key}" -eq "64" ] || return 1
+
+  case "$_enc_mac_key" in
+    *[!0123456789ABCDEFabcdef]*) return 1 ;;
+  esac
+
+  printf '%s\n' "$_enc_mac_key"
+)
+
+_enc_hmac()
+(
+  set +x
+
+  [ "$#" -eq "2" ] || return 2
+  [ "${#1}" -eq "64" ] || return 1
+
+  case "$1" in
+    *[!0123456789ABCDEFabcdef]*) return 1 ;;
+  esac
+
+  [ -f "$2" ] || return 1
+
+  _enc_hmac_output="$(
+    openssl dgst -sha256 \
+      -mac HMAC \
+      -macopt "hexkey:$1" \
+      "$2"
+  )" || return 1
+
+  _enc_hmac_tag="${_enc_hmac_output##* }"
+
+  [ "${#_enc_hmac_tag}" -eq "64" ] || return 1
+
+  case "$_enc_hmac_tag" in
+    *[!0123456789abcdef]*) return 1 ;;
+  esac
+
+  printf '%s\n' "$_enc_hmac_tag"
+)
+
+# encodes stdin to stdout
+# ENC_PASS may provide the password; otherwise it is read from /dev/tty
 
 encode()
-{
-  if [ -z "$ENC_PASS" ]
+(
+  set +x
+
+  [ "$#" -eq "0" ] || return 2
+
+  if [ "${ENC_PASS+x}" != "x" ] || [ -z "$ENC_PASS" ]
   then
-    openssl enc -e -aes-256-cbc -pbkdf2
-  else
-    (export ENC_PASS; openssl enc -e -aes-256-cbc -pbkdf2 -pass "env:ENC_PASS")
+    ENC_PASS="$(_enc_password_read "Encryption password: ")" || return 1
+    [ -n "$ENC_PASS" ] || return 1
+
+    _enc_password_confirm="$(_enc_password_read "Verify encryption password: ")" || return 1
+    [ "$ENC_PASS" = "$_enc_password_confirm" ] || return 1
+
+    unset _enc_password_confirm
   fi
-}
+
+  _enc_password="$ENC_PASS"
+  unset ENC_PASS
+
+  _enc_tmp="$(_enc_tmp_create)" || return 1
+  umask 077
+  trap 'rm -rf "$_enc_tmp"' 0
+  trap 'exit 1' HUP INT QUIT TERM
+
+  _enc_cipher="$_enc_tmp/cipher"
+  _enc_body="$_enc_tmp/body"
+  _enc_payload="$_enc_tmp/payload"
+  _enc_output="$_enc_tmp/output"
+
+  ENC_PASS="$_enc_password" \
+    openssl enc -e -aes-256-cbc \
+      -pbkdf2 \
+      -iter 600000 \
+      -md sha256 \
+      -pass env:ENC_PASS \
+      > "$_enc_cipher" || return 1
+
+  openssl base64 < "$_enc_cipher" > "$_enc_body" || return 1
+
+  _enc_mac_salt="$(openssl rand -hex 8)" || return 1
+
+  [ "${#_enc_mac_salt}" -eq "16" ] || return 1
+
+  case "$_enc_mac_salt" in
+    *[!0123456789abcdef]*) return 1 ;;
+  esac
+
+  {
+    printf '%s\n' "ENC1"
+    printf 'SALT:%s\n' "$_enc_mac_salt"
+    cat "$_enc_body"
+  } > "$_enc_payload" || return 1
+
+  _enc_mac_key="$(_enc_mac_key "$_enc_mac_salt" "$_enc_password")" || return 1
+  _enc_tag="$(_enc_hmac "$_enc_mac_key" "$_enc_payload")" || return 1
+
+  unset _enc_mac_key
+  unset _enc_password
+
+  {
+    printf '%s\n' "ENC1"
+    printf 'SALT:%s\n' "$_enc_mac_salt"
+    printf 'HMAC:%s\n' "$_enc_tag"
+    cat "$_enc_body"
+  } > "$_enc_output" || return 1
+
+  cat "$_enc_output"
+)
 
 #------------------------------------------------------------------------------
 
-# decodes stdin to stdout (password can be provided through environmental variable ENC_PASS)
+# decodes stdin to stdout
+# ENC_PASS may provide the password; otherwise it is read from /dev/tty
 
 decode()
-{
-  if [ -z "$ENC_PASS" ]
+(
+  set +x
+
+  [ "$#" -eq "0" ] || return 2
+
+  if [ "${ENC_PASS+x}" != "x" ] || [ -z "$ENC_PASS" ]
   then
-    openssl enc -d -aes-256-cbc -pbkdf2
-  else
-    (export ENC_PASS; openssl enc -d -aes-256-cbc -pbkdf2 -pass "env:ENC_PASS")
+    ENC_PASS="$(_enc_password_read "Decryption password: ")" || return 1
+    [ -n "$ENC_PASS" ] || return 1
   fi
-}
+
+  _enc_password="$ENC_PASS"
+  unset ENC_PASS
+
+  _enc_tmp="$(_enc_tmp_create)" || return 1
+  umask 077
+  trap 'rm -rf "$_enc_tmp"' 0
+  trap 'exit 1' HUP INT QUIT TERM
+
+  _enc_input="$_enc_tmp/input"
+  _enc_body="$_enc_tmp/body"
+  _enc_payload="$_enc_tmp/payload"
+  _enc_cipher="$_enc_tmp/cipher"
+
+  cat > "$_enc_input" || return 1
+
+  {
+    IFS= read -r _enc_magic || return 1
+    IFS= read -r _enc_salt_line || return 1
+    IFS= read -r _enc_tag_line || return 1
+    cat > "$_enc_body" || return 1
+  } < "$_enc_input"
+
+  [ "$_enc_magic" = "ENC1" ] || return 1
+
+  case "$_enc_salt_line" in
+    SALT:*)
+      _enc_mac_salt="${_enc_salt_line#SALT:}"
+    ;;
+
+    *)
+      return 1
+    ;;
+  esac
+
+  [ "${#_enc_mac_salt}" -eq "16" ] || return 1
+
+  case "$_enc_mac_salt" in
+    *[!0123456789abcdef]*) return 1 ;;
+  esac
+
+  case "$_enc_tag_line" in
+    HMAC:*)
+      _enc_tag="${_enc_tag_line#HMAC:}"
+    ;;
+
+    *)
+      return 1
+    ;;
+  esac
+
+  [ "${#_enc_tag}" -eq "64" ] || return 1
+
+  case "$_enc_tag" in
+    *[!0123456789abcdef]*) return 1 ;;
+  esac
+
+  {
+    printf '%s\n' "ENC1"
+    printf 'SALT:%s\n' "$_enc_mac_salt"
+    cat "$_enc_body"
+  } > "$_enc_payload" || return 1
+
+  _enc_mac_key="$(_enc_mac_key "$_enc_mac_salt" "$_enc_password")" || return 1
+  _enc_expected_tag="$(_enc_hmac "$_enc_mac_key" "$_enc_payload")" || return 1
+
+  unset _enc_mac_key
+
+  [ "$_enc_tag" = "$_enc_expected_tag" ] || return 1
+
+  openssl base64 -d < "$_enc_body" > "$_enc_cipher" || return 1
+
+  ENC_PASS="$_enc_password" \
+    openssl enc -d -aes-256-cbc \
+      -pbkdf2 \
+      -iter 600000 \
+      -md sha256 \
+      -pass env:ENC_PASS \
+      < "$_enc_cipher"
+)
 
 #------------------------------------------------------------------------------
 
