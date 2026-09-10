@@ -70,7 +70,7 @@ rsudo_core()
     then
       if [ "$#" -gt "1" ]
       then
-        set -- "$(saveargs "$@")"
+        set -- "$(quote "$@")"
       fi
 
       set -- sh -c "$(quote "$@")"
