@@ -7,20 +7,20 @@ quote()
   (
     while [ "$#" -gt 0 ]
     do
-      _saveargs_arg="$1"
+      _arg="$1"
 
       printf "'" || exit 1
 
-      while [ "$_saveargs_arg" != "${_saveargs_arg#*"'"}" ]
+      while [ "$_arg" != "${_arg#*"'"}" ]
       do
-        _saveargs_part="${_saveargs_arg%%"'"*}"
+        _part="${_arg%%"'"*}"
 
-        printf "%s'\\\\''" "$_saveargs_part" || exit 2
+        printf "%s'\\\\''" "$_part" || exit 2
 
-        _saveargs_arg="${_saveargs_arg#*"'"}"
+        _arg="${_arg#*"'"}"
       done
 
-      printf "%s'" "$_saveargs_arg" || exit 3
+      printf "%s'" "$_arg" || exit 3
 
       shift
 
