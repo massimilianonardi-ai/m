@@ -9,24 +9,24 @@ quote()
     do
       _saveargs_arg="$1"
 
-      printf "'" || exit
+      printf "'" || exit 1
 
       while [ "$_saveargs_arg" != "${_saveargs_arg#*"'"}" ]
       do
         _saveargs_part="${_saveargs_arg%%"'"*}"
 
-        printf "%s'\\\\''" "$_saveargs_part" || exit
+        printf "%s'\\\\''" "$_saveargs_part" || exit 2
 
         _saveargs_arg="${_saveargs_arg#*"'"}"
       done
 
-      printf "%s'" "$_saveargs_arg" || exit
+      printf "%s'" "$_saveargs_arg" || exit 3
 
       shift
 
       if [ "$#" -gt 0 ]
       then
-        printf " " || exit
+        printf " " || exit 4
       fi
     done
   )
