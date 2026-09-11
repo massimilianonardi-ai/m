@@ -2,10 +2,15 @@
 #
 # POSIX-sh terminal-menu engine with pluggable list providers.
 #
+# Dependencies:
+#   array.lib.sh (which provides array() and sources arg.lib.sh for quote())
+#
 # Public configuration variables:
 #   menu_ext_header
 #   menu_ext_footer
 #   menu_ext_bottom_footer
+#   menu_ext_array_values   array name used by menu_ext_array_provider
+#   menu_ext_array_labels   array name used by menu_ext_array_provider
 #
 # Public result variables set by menu_ext_run_provider:
 #   menu_ext_result_key
@@ -17,6 +22,7 @@
 #   menu_ext_key_clear
 #   menu_ext_key_add KEY
 #   menu_ext_run_provider PROVIDER
+#   menu_ext_array_provider
 #
 # Provider contract
 # -----------------
@@ -27,7 +33,9 @@
 #
 #   PROVIDER item INDEX
 #     Set menu_ext_provider_value and menu_ext_provider_label.
-#     Values and labels must not contain a newline.
+#     Values may contain embedded or trailing newlines. Labels are currently
+#     single-line because the renderer still uses one terminal row per item.
+#     POSIX shell variables cannot represent NUL bytes.
 #
 #   PROVIDER event KEY INDEX VALUE LABEL
 #     The engine sets menu_ext_provider_action=return before the call.
@@ -43,6 +51,18 @@
 # the same way. Escape and up/down/pageup/pagedown/home/end are owned by the
 # engine and cannot be configured.
 #
+# Array-backed provider
+# ---------------------
+# menu_ext_array_provider exposes two parallel arrays created through array():
+#
+#   menu_ext_array_values=VALUES_ARRAY_NAME
+#   menu_ext_array_labels=LABELS_ARRAY_NAME
+#
+# Both arrays must have the same size. The size equality is checked whenever
+# the engine loads/reloads the provider. Array values are copied directly into
+# the provider output variables, preserving embedded and trailing newlines.
+# Labels remain subject to the current single-line renderer contract.
+#
 # The input vocabulary intentionally follows RumiAI OS read-key:
 #   escape, up, down, left, right, home, end, insert, delete,
 #   pageup, pagedown, backspace, tab, backtab, enter, nul, f1..f20,
@@ -52,12 +72,16 @@
 # it does not initialize and restore the TTY for every key: one menu session
 # owns the TTY state and terminfo keymap for its whole lifetime.
 
+. array.lib.sh
+
 menu_ext_reset()
 {
   menu_ext_header=""
   menu_ext_footer=""
   menu_ext_bottom_footer=""
   menu_ext_custom_keys=""
+  menu_ext_array_values=""
+  menu_ext_array_labels=""
   menu_ext_result_key=""
   menu_ext_result_value=""
   menu_ext_error=""
@@ -66,6 +90,38 @@ menu_ext_reset()
 menu_ext_key_clear()
 {
   menu_ext_custom_keys=""
+}
+
+menu_ext_array_provider()
+{
+  case "$1" in
+    count)
+      [ "$#" -eq 1 ] || return 2
+      [ -n "$menu_ext_array_values" ] || return 2
+      [ -n "$menu_ext_array_labels" ] || return 2
+
+      array "$menu_ext_array_values" size menu_ext__array_values_size || return "$?"
+      array "$menu_ext_array_labels" size menu_ext__array_labels_size || return "$?"
+
+      [ "$menu_ext__array_values_size" = "$menu_ext__array_labels_size" ] || return 1
+
+      menu_ext_provider_count="$menu_ext__array_values_size"
+      ;;
+    item)
+      [ "$#" -eq 2 ] || return 2
+
+      array "$menu_ext_array_values" get "$2" menu_ext_provider_value || return "$?"
+      array "$menu_ext_array_labels" get "$2" menu_ext_provider_label || return "$?"
+      ;;
+    event)
+      [ "$#" -eq 5 ] || return 2
+      ;;
+    *)
+      return 2
+      ;;
+  esac
+
+  return 0
 }
 
 menu_ext__key_is_reserved()
@@ -503,13 +559,6 @@ menu_ext__provider_item_get()
     return 2
   }
 
-  case "$menu_ext_provider_value" in
-    *"$menu_ext__newline"*)
-      menu_ext__fail "provider value contains a newline at index $1"
-      return 2
-      ;;
-  esac
-
   case "$menu_ext_provider_label" in
     *"$menu_ext__newline"*)
       menu_ext__fail "provider label contains a newline at index $1"
@@ -522,13 +571,13 @@ menu_ext__provider_item_get()
 
 menu_ext__provider_event()
 {
-  menu_ext__event_key=$1
-  menu_ext__event_index=$2
+  menu_ext__event_key="$1"
+  menu_ext__event_index="$2"
 
   menu_ext__provider_item_get "$menu_ext__event_index" || return 2
 
-  menu_ext__event_value=$menu_ext_provider_value
-  menu_ext__event_label=$menu_ext_provider_label
+  menu_ext__event_value="$menu_ext_provider_value"
+  menu_ext__event_label="$menu_ext_provider_label"
   menu_ext_provider_action="return"
 
   "$menu_ext__provider" event "$menu_ext__event_key" "$menu_ext__event_index" \
@@ -547,7 +596,8 @@ menu_ext__provider_event()
 
   case "$menu_ext_provider_action" in
     return)
-      menu_ext__session_result="$menu_ext__event_key@:=$menu_ext__event_value"
+      menu_ext__session_result_key="$menu_ext__event_key"
+      menu_ext__session_result_value="$menu_ext__event_value"
       return 10
       ;;
     reload)
@@ -958,7 +1008,7 @@ menu_ext__main_loop()
 
 menu_ext__session()
 {
-  menu_ext__provider=$1
+  menu_ext__provider="$1"
   menu_ext__tty_device="/dev/tty"
   menu_ext__interbyte_time="1"
   menu_ext__tty_saved=""
@@ -966,7 +1016,8 @@ menu_ext__session()
   menu_ext__alt_screen="0"
   menu_ext__cursor_hidden="0"
   menu_ext__keymap=""
-  menu_ext__session_result=""
+  menu_ext__session_result_key=""
+  menu_ext__session_result_value=""
   menu_ext__session_error=""
 
   trap 'menu_ext__cleanup' 0
@@ -978,17 +1029,25 @@ menu_ext__session()
   trap 'exit 148' TSTP
 
   menu_ext__terminal_init
-  menu_ext__status=$?
+  menu_ext__status="$?"
 
   if [ "$menu_ext__status" -eq 0 ]
   then
     menu_ext__main_loop
-    menu_ext__status=$?
+    menu_ext__status="$?"
   fi
 
   case "$menu_ext__status" in
-    0) printf -- '%s\n' "$menu_ext__session_result" ;;
-    2) printf -- '%s\n' "$menu_ext__session_error" ;;
+    0)
+      menu_ext__session_record="$(quote "$menu_ext__session_result_key" "$menu_ext__session_result_value")" || {
+        printf -- '%s\n' "cannot serialize menu result"
+        return 2
+      }
+      printf -- '%s\n' "$menu_ext__session_record"
+      ;;
+    2)
+      printf -- '%s\n' "$menu_ext__session_error"
+      ;;
   esac
 
   return "$menu_ext__status"
@@ -1007,27 +1066,33 @@ menu_ext_run_provider()
   fi
 
   menu_ext__record="$(menu_ext__session "$1")"
-  menu_ext__status=$?
+  menu_ext__status="$?"
 
   case "$menu_ext__status" in
     0)
-      case "$menu_ext__record" in
-        *@:=*)
-          menu_ext_result_key=${menu_ext__record%%@:=*}
-          menu_ext_result_value=${menu_ext__record#*@:=}
-          return 0
-          ;;
-        *)
-          menu_ext_error="invalid internal menu result"
-          return 2
-          ;;
-      esac
+      # menu_ext__record is produced only by quote(), so eval reparses a
+      # shell-safe serialized argument list rather than provider data as code.
+      if ! eval "set -- $menu_ext__record"
+      then
+        menu_ext_error="invalid internal menu result"
+        return 2
+      fi
+
+      if [ "$#" -ne 2 ]
+      then
+        menu_ext_error="invalid internal menu result"
+        return 2
+      fi
+
+      menu_ext_result_key="$1"
+      menu_ext_result_value="$2"
+      return 0
       ;;
     1)
       return 1
       ;;
     2)
-      menu_ext_error=$menu_ext__record
+      menu_ext_error="$menu_ext__record"
       [ -n "$menu_ext_error" ] || menu_ext_error="menu engine failed"
       return 2
       ;;
