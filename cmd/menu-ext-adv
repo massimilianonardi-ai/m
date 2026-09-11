@@ -1,44 +1,66 @@
 #!/bin/sh
 
-# menu-ext: small terminal menu with a POSIX-sh implementation.
+# menu-ext-adv: terminal menu with configurable action keys.
 #
 # Usage:
-#   menu-ext [-H header] [-F footer] [-B bottom-footer] -- item ...
+#   menu-ext-adv [-H header] [-F footer] [-B bottom-footer] -K key [-K key ...] -- item ...
 #
 # Each item is either:
 #   text
 #   value@:=text
 #
-# The selected value is written to standard output.  The terminal UI is
-# written directly to /dev/tty, so command substitution remains usable.
+# A configured key returns:
+#   key@:=value
+#
+# Escape always cancels. Navigation keys are reserved and cannot be configured.
+# The terminal UI is written directly to /dev/tty; stdout is reserved for the result.
 
 header=""
 footer=""
 bottom_footer=""
+custom_keys=""
 tty_active="0"
 alt_screen="0"
 cursor_hidden="0"
 saved_tty=""
+newline='
+'
 
 usage()
 {
   printf '%s\n' \
-    'usage: menu-ext [-H header] [-F footer] [-B bottom-footer] -- item ...' \
+    'usage: menu-ext-adv [-H header] [-F footer] [-B bottom-footer] -K key [-K key ...] -- item ...' \
     '' \
     'options:' \
     '  -H text        header at the top of the screen' \
     '  -F text        footer immediately after the last visible item' \
     '  -B text        footer anchored at the bottom of the screen' \
+    '  -K key         configured action key; may be repeated' \
     '' \
     'item forms:' \
-    '  text           display and return text' \
-    '  value@:=text   display text and return value' \
+    '  text           display and select text' \
+    '  value@:=text   display text and select value' \
     '' \
-    'keys:' \
-    '  Up/Down, k/j   move' \
-    '  PageUp/PageDown move by one page' \
-    '  Enter          select' \
-    '  q, Esc         cancel'
+    'custom key forms:' \
+    '  x              one printable ASCII character' \
+    '  space          Space' \
+    '  tab            Tab' \
+    '  enter          Enter/Return' \
+    '  backspace      Backspace' \
+    '  delete         Delete' \
+    '  insert         Insert' \
+    '  arrow_left     Left arrow' \
+    '  arrow_right    Right arrow' \
+    '  f1 ... f20     function keys' \
+    '' \
+    'reserved keys:' \
+    '  esc            cancel' \
+    '  arrow_up       move up' \
+    '  arrow_down     move down' \
+    '  pageup         move one page up' \
+    '  pagedown       move one page down' \
+    '  home           move to first item' \
+    '  end            move to last item'
 }
 
 cleanup()
@@ -65,7 +87,7 @@ cleanup()
 fail()
 {
   cleanup
-  printf 'menu-ext: %s\n' "$1" >&2
+  printf 'menu-ext-adv: %s\n' "$1" >&2
   exit 2
 }
 
@@ -130,16 +152,44 @@ read_csi_key()
     if [ "$byte" -ge 64 ] && [ "$byte" -le 126 ]
     then
       case "$byte" in
-        65)
-          key="up"
-          ;;
-        66)
-          key="down"
-          ;;
+        65) key="arrow_up" ;;
+        66) key="arrow_down" ;;
+        67) key="arrow_right" ;;
+        68) key="arrow_left" ;;
+        70) key="end" ;;
+        72) key="home" ;;
+        80) key="f1" ;;
+        81) key="f2" ;;
+        82) key="f3" ;;
+        83) key="f4" ;;
         126)
           case "$csi_parameter" in
+            1|7) key="home" ;;
+            2) key="insert" ;;
+            3) key="delete" ;;
+            4|8) key="end" ;;
             5) key="pageup" ;;
             6) key="pagedown" ;;
+            11) key="f1" ;;
+            12) key="f2" ;;
+            13) key="f3" ;;
+            14) key="f4" ;;
+            15) key="f5" ;;
+            17) key="f6" ;;
+            18) key="f7" ;;
+            19) key="f8" ;;
+            20) key="f9" ;;
+            21) key="f10" ;;
+            23) key="f11" ;;
+            24) key="f12" ;;
+            25) key="f13" ;;
+            26) key="f14" ;;
+            28) key="f15" ;;
+            29) key="f16" ;;
+            31) key="f17" ;;
+            32) key="f18" ;;
+            33) key="f19" ;;
+            34) key="f20" ;;
             *)  key="other" ;;
           esac
           ;;
@@ -167,7 +217,7 @@ read_csi_key()
 
     if ! read_byte_timed
     then
-      key="escape"
+      key="esc"
       return 0
     fi
   done
@@ -178,13 +228,19 @@ read_key_from_byte()
   key=""
 
   case "$byte" in
+    8|127)
+      key="backspace"
+      ;;
+    9)
+      key="tab"
+      ;;
     10|13)
       key="enter"
       ;;
     27)
       if ! read_byte_timed
       then
-        key="escape"
+        key="esc"
         return 0
       fi
 
@@ -192,38 +248,41 @@ read_key_from_byte()
         91)
           if ! read_byte_timed
           then
-            key="escape"
+            key="esc"
             return 0
           fi
-
           read_csi_key
           ;;
         79)
           if ! read_byte_timed
           then
-            key="escape"
+            key="esc"
             return 0
           fi
-
           case "$byte" in
-            65) key="up" ;;
-            66) key="down" ;;
+            65) key="arrow_up" ;;
+            66) key="arrow_down" ;;
+            67) key="arrow_right" ;;
+            68) key="arrow_left" ;;
+            70) key="end" ;;
+            72) key="home" ;;
+            80) key="f1" ;;
+            81) key="f2" ;;
+            82) key="f3" ;;
+            83) key="f4" ;;
             *)  key="other" ;;
           esac
           ;;
         *)
-          key="escape"
+          key="esc"
           ;;
       esac
       ;;
-    106)
-      key="down"
+    32)
+      key="space"
       ;;
-    107)
-      key="up"
-      ;;
-    113)
-      key="quit"
+    33|34|35|36|37|38|39|40|41|42|43|44|45|46|47|48|49|50|51|52|53|54|55|56|57|58|59|60|61|62|63|64|65|66|67|68|69|70|71|72|73|74|75|76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|91|92|93|94|95|96|97|98|99|100|101|102|103|104|105|106|107|108|109|110|111|112|113|114|115|116|117|118|119|120|121|122|123|124|125|126)
+      key="$(awk -v n="$byte" 'BEGIN { printf "%c", n }')"
       ;;
     *)
       key="other"
@@ -256,6 +315,92 @@ read_key_nowait()
   fi
 
   read_key_from_byte
+}
+
+key_is_reserved()
+{
+  case "$1" in
+    esc|arrow_up|arrow_down|pageup|pagedown|home|end)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+key_is_named_custom()
+{
+  case "$1" in
+    space|tab|enter|backspace|delete|insert|arrow_left|arrow_right|f1|f2|f3|f4|f5|f6|f7|f8|f9|f10|f11|f12|f13|f14|f15|f16|f17|f18|f19|f20)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+custom_key_is_configured()
+{
+  case "$newline$custom_keys$newline" in
+    *"$newline$1$newline"*)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+validate_custom_key()
+{
+  candidate="$1"
+
+  if key_is_reserved "$candidate"
+  then
+    fail "key is reserved: $candidate"
+  fi
+
+  if key_is_named_custom "$candidate"
+  then
+    return 0
+  fi
+
+  candidate_size="$(LC_ALL=C printf '%s' "$candidate" | wc -c | tr -d '[:space:]')"
+  if [ "$candidate_size" != "1" ]
+  then
+    fail "invalid custom key: $candidate"
+  fi
+
+  candidate_byte="$(LC_ALL=C printf '%s' "$candidate" | od -A n -t u1 | tr -d '[:space:]')"
+  case "$candidate_byte" in
+    ''|*[!0-9]*) fail "invalid custom key: $candidate" ;;
+  esac
+
+  if [ "$candidate_byte" -eq 32 ]
+  then
+    fail 'use key alias space instead of a literal space'
+  fi
+
+  if [ "$candidate_byte" -lt 33 ] || [ "$candidate_byte" -gt 126 ]
+  then
+    fail "invalid custom key: $candidate"
+  fi
+}
+
+add_custom_key()
+{
+  validate_custom_key "$1"
+
+  if custom_key_is_configured "$1"
+  then
+    fail "duplicate custom key: $1"
+  fi
+
+  if [ -z "$custom_keys" ]
+  then
+    custom_keys="$1"
+  else
+    custom_keys="$custom_keys$newline$1"
+  fi
 }
 
 update_geometry()
@@ -361,7 +506,7 @@ selected_value()
     if [ "$index" -eq "$wanted" ]
     then
       split_item "$item"
-      printf '%s\n' "$item_value"
+      selected_item_value="$item_value"
       return 0
     fi
 
@@ -371,24 +516,42 @@ selected_value()
   return 1
 }
 
+return_custom_selection()
+{
+  pressed_key="$1"
+  wanted="$2"
+  shift 2
+
+  selected_value "$wanted" "$@" || fail 'cannot resolve selection'
+  cleanup
+  printf '%s@:=%s\n' "$pressed_key" "$selected_item_value"
+  exit 0
+}
+
 apply_key()
 {
   action=""
 
   case "$key" in
-    up)
+    esc)
+      action="cancel"
+      return 0
+      ;;
+    arrow_up)
       if [ "$selected" -gt 0 ]
       then
         selected="$((selected - 1))"
         action="move"
       fi
+      return 0
       ;;
-    down)
+    arrow_down)
       if [ "$selected" -lt "$((item_count - 1))" ]
       then
         selected="$((selected + 1))"
         action="move"
       fi
+      return 0
       ;;
     pageup)
       page_step="$((visible_rows - 1))"
@@ -396,7 +559,6 @@ apply_key()
       then
         page_step="1"
       fi
-
       if [ "$selected" -gt 0 ]
       then
         selected="$((selected - page_step))"
@@ -406,6 +568,7 @@ apply_key()
         fi
         action="move"
       fi
+      return 0
       ;;
     pagedown)
       page_step="$((visible_rows - 1))"
@@ -413,7 +576,6 @@ apply_key()
       then
         page_step="1"
       fi
-
       if [ "$selected" -lt "$((item_count - 1))" ]
       then
         selected="$((selected + page_step))"
@@ -423,17 +585,33 @@ apply_key()
         fi
         action="move"
       fi
+      return 0
       ;;
-    enter)
-      action="select"
+    home)
+      if [ "$selected" -ne 0 ]
+      then
+        selected="0"
+        action="move"
+      fi
+      return 0
       ;;
-    quit|escape)
-      action="cancel"
+    end)
+      if [ "$selected" -ne "$((item_count - 1))" ]
+      then
+        selected="$((item_count - 1))"
+        action="move"
+      fi
+      return 0
       ;;
   esac
+
+  if custom_key_is_configured "$key"
+  then
+    action="custom"
+  fi
 }
 
-while getopts ':H:F:B:h' option
+while getopts ':H:F:B:K:h' option
 do
   case "$option" in
     H)
@@ -444,6 +622,9 @@ do
       ;;
     B)
       bottom_footer="$OPTARG"
+      ;;
+    K)
+      add_custom_key "$OPTARG"
       ;;
     h)
       usage
@@ -457,6 +638,11 @@ do
       ;;
   esac
 done
+
+if [ -z "$custom_keys" ]
+then
+  fail 'at least one -K custom key is required'
+fi
 
 delimiter_index="$((OPTIND - 1))"
 index="1"
@@ -487,8 +673,6 @@ then
   fail 'at least one menu item is required'
 fi
 
-newline='
-'
 for item
 do
   split_item "$item"
@@ -559,10 +743,8 @@ do
   apply_key
 
   case "$action" in
-    select)
-      cleanup
-      selected_value "$selected" "$@" || fail 'cannot resolve selection'
-      exit 0
+    custom)
+      return_custom_selection "$key" "$selected" "$@"
       ;;
     cancel)
       cleanup
@@ -575,10 +757,8 @@ do
         apply_key
 
         case "$action" in
-          select)
-            cleanup
-            selected_value "$selected" "$@" || fail 'cannot resolve selection'
-            exit 0
+          custom)
+            return_custom_selection "$key" "$selected" "$@"
             ;;
           cancel)
             cleanup
