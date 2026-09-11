@@ -20,26 +20,165 @@ exec_if_exist_function()
 
 #-------------------------------------------------------------------------------
 
-# env_eval $template_var $@
-# copies content of $template_var and echoes to stdout after substituting positional parameters with remaining args $@
-env_eval()
-{
-  if [ -z "$1" ]
+env_eval_no_exec()
+(
+  if [ "$#" -ne "1" ]
   then
     return 1
   fi
 
-  eval echo '$(shift; cat << EOF
+  env_eval_word="$(
+    printf '%sx' "$1" | LC_ALL=C awk '
+      BEGIN {
+        sq = sprintf("%c", 39)
+      }
+
+      NR == 1 {
+        text = $0
+        next
+      }
+
+      {
+        text = text "\n" $0
+      }
+
+      END {
+        # Remove the sentinel appended by printf.
+        text = substr(text, 1, length(text) - 1)
+
+        # Build one shell word. Literal text is always single-quoted;
+        # only validated variable names become parameter expansions.
+        out = sq
+
+        for (i = 1; i <= length(text); i++) {
+          c = substr(text, i, 1)
+
+          # Heredoc-like backslash handling.
+          if (c == "\\") {
+            n = substr(text, i + 1, 1)
+
+            if (n == "$" || n == "\\" || n == "`") {
+              append_literal(n)
+              i++
+              continue
+            }
+
+            if (n == "\n") {
+              i++
+              continue
+            }
+
+            append_literal(c)
+            continue
+          }
+
+          if (c != "$") {
+            append_literal(c)
+            continue
+          }
+
+          n = substr(text, i + 1, 1)
+
+          # ${NAME}
+          if (n == "{") {
+            rest = substr(text, i + 2)
+            endpos = index(rest, "}")
+
+            if (endpos == 0)
+              exit 2
+
+            name = substr(rest, 1, endpos - 1)
+
+            if (name !~ /^[A-Za-z_][A-Za-z0-9_]*$/)
+              exit 2
+
+            out = out sq "\"${" name "}\"" sq
+            i += endpos + 1
+            continue
+          }
+
+          # $NAME
+          if (n ~ /[A-Za-z_]/) {
+            name = n
+            j = i + 2
+
+            while (j <= length(text)) {
+              n = substr(text, j, 1)
+
+              if (n !~ /[A-Za-z0-9_]/)
+                break
+
+              name = name n
+              j++
+            }
+
+            out = out sq "\"${" name "}\"" sq
+            i = j - 1
+            continue
+          }
+
+          # Any other $ construct is literal.
+          append_literal(c)
+        }
+
+        print out sq
+      }
+
+      function append_literal(c) {
+        if (c == sq)
+          out = out sq "\\" sq sq
+        else
+          out = out c
+      }
+    '
+  )" || return 1
+
+  eval "printf '%s' $env_eval_word"
+)
+
+#-------------------------------------------------------------------------------
+
+# TODO non colliding heredoc delimiter. printf instead of echo. safe against \ as first/last character
+# env_eval $template_var $@
+# copies content of $template_var and echoes to stdout after substituting positional parameters with remaining args $@
+# removes trailing newlines
+env_eval()
+{
+  [ "$#" -ge "1" ] || return 1
+
+  eval printf '%s' '"$(shift; cat << EOF_972364927347827384671231827319283918729387981237
 '"${1}"'
-EOF
-)'
+
+EOF_972364927347827384671231827319283918729387981237
+)"'
 }
+
+env_eval2()
+{
+  [ "$#" -ge "1" ] || return 1
+
+  eval 'shift; cat << EOF_972364927347827384671231827319283918729387981237
+'"${1}"'
+
+EOF_972364927347827384671231827319283918729387981237
+'
+}
+
+# env_eval3()
+# {
+#   [ "$#" -ge "2" ] || return 1
+#
+#   eval 'shift 2; cat << '"${2}"'
+# '"${1}"'
+# '"${2}"'
+# '
+# }
 
 #-------------------------------------------------------------------------------
 
 # env_eval_set destination_var_to_set $template_var $@
 # copies content of $template_var into destination_var_to_set after substituting positional parameters with remaining args $@
-env_eval_set()
+env_eval_set_old()
 {
   if [ -z "$1" ] || [ -z "$2" ]
   then
@@ -50,6 +189,22 @@ env_eval_set()
 '"${2}"'
 EOF
 )'
+}
+
+# env_eval_expand <var-name> <text-to-expand> <arg1> <arg2> ...
+# expands <text-to-expand> with the same rules of an heredoc, interpreting variables, command substitution, etc. arg1, arg2 are passed as positional parameters $1, $2, etc.
+# returns cat error code, handles trailing \+EOF, keeps trailing newlines
+env_eval_expand()
+{
+  [ "$#" -ge "2" ] || return 1
+  case "$1" in ""|[0123456789]*|*[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_]*) return 2;; esac
+
+  eval "${1}"='$(shift 2; cat << EOF_972364927347827384671231827319283918729387981237
+'"${2}"'
+x
+EOF_972364927347827384671231827319283918729387981237
+)' '&&' "${1}=\${${1}%x}" '&&' "${1}=\${${1}%
+}"
 }
 
 #-------------------------------------------------------------------------------
