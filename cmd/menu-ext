@@ -1,0 +1,388 @@
+#!/bin/sh
+
+# menu-ext: small terminal menu with a POSIX-sh implementation.
+#
+# Usage:
+#   menu-ext [-H header] [-F footer] -- item ...
+#
+# Each item is either:
+#   text
+#   value@:=text
+#
+# The selected value is written to standard output.  The terminal UI is
+# written directly to /dev/tty, so command substitution remains usable.
+
+header=""
+footer=""
+tty_active="0"
+alt_screen="0"
+saved_tty=""
+
+usage()
+{
+  printf '%s\n' \
+    'usage: menu-ext [-H header] [-F footer] -- item ...' \
+    '' \
+    'item forms:' \
+    '  text           display and return text' \
+    '  value@:=text   display text and return value' \
+    '' \
+    'keys:' \
+    '  Up/Down, k/j   move' \
+    '  Enter          select' \
+    '  q, Esc         cancel'
+}
+
+cleanup()
+{
+  if [ "$tty_active" = "1" ]
+  then
+    stty "$saved_tty" <&3 2>/dev/null || :
+    tput sgr0 >&3 2>/dev/null || :
+
+    if [ "$alt_screen" = "1" ]
+    then
+      tput rmcup >&3 2>/dev/null || :
+    fi
+
+    tty_active="0"
+  fi
+}
+
+fail()
+{
+  cleanup
+  printf 'menu-ext: %s\n' "$1" >&2
+  exit 2
+}
+
+split_item()
+{
+  case "$1" in
+    *@:=*)
+      item_value="${1%%@:=*}"
+      item_text="${1#*@:=}"
+      ;;
+    *)
+      item_value="$1"
+      item_text="$1"
+      ;;
+  esac
+}
+
+line_count()
+{
+  if [ -z "$1" ]
+  then
+    printf '%s\n' '0'
+  else
+    printf '%s\n' "$1" | awk 'END { print NR }'
+  fi
+}
+
+print_block()
+{
+  printf '%s\n' "$1" |
+    awk -v width="$2" '{ print substr($0, 1, width) }' >&3
+}
+
+read_byte()
+{
+  byte="$(dd bs=1 count=1 <&3 2>/dev/null | od -A n -t u1 | tr -d '[:space:]')"
+  [ -n "$byte" ]
+}
+
+read_byte_timed()
+{
+  stty min 0 time 2 <&3 2>/dev/null || return 1
+  byte="$(dd bs=1 count=1 <&3 2>/dev/null | od -A n -t u1 | tr -d '[:space:]')"
+  stty min 1 time 0 <&3 2>/dev/null || return 1
+  [ -n "$byte" ]
+}
+
+read_key()
+{
+  key=""
+
+  if ! read_byte
+  then
+    return 1
+  fi
+
+  case "$byte" in
+    10|13)
+      key="enter"
+      ;;
+    27)
+      if ! read_byte_timed
+      then
+        key="escape"
+        return 0
+      fi
+
+      case "$byte" in
+        91|79)
+          if ! read_byte_timed
+          then
+            key="escape"
+            return 0
+          fi
+
+          case "$byte" in
+            65) key="up" ;;
+            66) key="down" ;;
+            *)  key="other" ;;
+          esac
+          ;;
+        *)
+          key="escape"
+          ;;
+      esac
+      ;;
+    106)
+      key="down"
+      ;;
+    107)
+      key="up"
+      ;;
+    113)
+      key="quit"
+      ;;
+    *)
+      key="other"
+      ;;
+  esac
+
+  return 0
+}
+
+update_geometry()
+{
+  term_lines="$(tput lines 2>/dev/null)" || fail 'cannot read terminal height'
+  term_cols="$(tput cols 2>/dev/null)" || fail 'cannot read terminal width'
+
+  case "$term_lines" in
+    ''|*[!0-9]*) fail 'invalid terminal height' ;;
+  esac
+
+  case "$term_cols" in
+    ''|*[!0-9]*) fail 'invalid terminal width' ;;
+  esac
+
+  header_lines="$(line_count "$header")"
+  footer_lines="$(line_count "$footer")"
+  visible_rows="$((term_lines - header_lines - footer_lines))"
+
+  if [ "$visible_rows" -lt 1 ] || [ "$term_cols" -lt 3 ]
+  then
+    fail 'terminal is too small'
+  fi
+}
+
+render_menu()
+{
+  selected="$1"
+  top="$2"
+  shift 2
+
+  tput clear >&3 2>/dev/null || fail 'terminal does not support clear'
+
+  if [ -n "$header" ]
+  then
+    print_block "$header" "$term_cols"
+  fi
+
+  index="0"
+  row="0"
+  text_width="$((term_cols - 2))"
+
+  for item
+  do
+    if [ "$index" -ge "$top" ] && [ "$row" -lt "$visible_rows" ]
+    then
+      split_item "$item"
+      text="$(printf '%s\n' "$item_text" | cut -c "1-$text_width")"
+
+      if [ "$index" -eq "$selected" ]
+      then
+        tput rev >&3 2>/dev/null || :
+        printf '> %s' "$text" >&3
+        tput sgr0 >&3 2>/dev/null || :
+        printf '\n' >&3
+      else
+        printf '  %s\n' "$text" >&3
+      fi
+
+      row="$((row + 1))"
+    fi
+
+    index="$((index + 1))"
+  done
+
+  while [ "$row" -lt "$visible_rows" ]
+  do
+    printf '\n' >&3
+    row="$((row + 1))"
+  done
+
+  if [ -n "$footer" ]
+  then
+    print_block "$footer" "$term_cols"
+  fi
+}
+
+selected_value()
+{
+  wanted="$1"
+  shift
+  index="0"
+
+  for item
+  do
+    if [ "$index" -eq "$wanted" ]
+    then
+      split_item "$item"
+      printf '%s\n' "$item_value"
+      return 0
+    fi
+
+    index="$((index + 1))"
+  done
+
+  return 1
+}
+
+while getopts ':H:F:h' option
+do
+  case "$option" in
+    H)
+      header="$OPTARG"
+      ;;
+    F)
+      footer="$OPTARG"
+      ;;
+    h)
+      usage
+      exit 0
+      ;;
+    :)
+      fail "option -$OPTARG requires an argument"
+      ;;
+    \?)
+      fail "unknown option: -$OPTARG"
+      ;;
+  esac
+done
+
+delimiter_index="$((OPTIND - 1))"
+index="1"
+delimiter_seen="0"
+for argument
+do
+  if [ "$index" -eq "$delimiter_index" ]
+  then
+    if [ "$argument" = "--" ]
+    then
+      delimiter_seen="1"
+    fi
+    break
+  fi
+
+  index="$((index + 1))"
+done
+
+shift "$delimiter_index"
+
+if [ "${delimiter_seen:-0}" != "1" ]
+then
+  fail 'missing -- before menu items'
+fi
+
+if [ "$#" -eq 0 ]
+then
+  fail 'at least one menu item is required'
+fi
+
+newline='
+'
+for item
+do
+  split_item "$item"
+  case "$item_text" in
+    *"$newline"*) fail 'menu item text must be a single line' ;;
+  esac
+done
+
+if ! command -v tput >/dev/null 2>&1
+then
+  fail 'tput is required'
+fi
+
+if ! exec 3<>/dev/tty
+then
+  fail 'no controlling terminal is available'
+fi
+
+saved_tty="$(stty -g <&3 2>/dev/null)" || fail 'cannot read terminal settings'
+tty_active="1"
+trap 'cleanup' 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 131' QUIT
+trap 'exit 143' TERM
+trap 'exit 148' TSTP
+
+stty -echo -icanon min 1 time 0 <&3 2>/dev/null || fail 'cannot configure terminal'
+
+if tput smcup >&3 2>/dev/null
+then
+  alt_screen="1"
+fi
+
+item_count="$#"
+selected="0"
+top="0"
+
+while :
+do
+  update_geometry
+
+  if [ "$selected" -lt "$top" ]
+  then
+    top="$selected"
+  elif [ "$selected" -ge "$((top + visible_rows))" ]
+  then
+    top="$((selected - visible_rows + 1))"
+  fi
+
+  render_menu "$selected" "$top" "$@"
+
+  if ! read_key
+  then
+    fail 'cannot read from terminal'
+  fi
+
+  case "$key" in
+    up)
+      if [ "$selected" -gt 0 ]
+      then
+        selected="$((selected - 1))"
+      fi
+      ;;
+    down)
+      if [ "$selected" -lt "$((item_count - 1))" ]
+      then
+        selected="$((selected + 1))"
+      fi
+      ;;
+    enter)
+      cleanup
+      selected_value "$selected" "$@" || fail 'cannot resolve selection'
+      exit 0
+      ;;
+    quit|escape)
+      cleanup
+      exit 1
+      ;;
+  esac
+done
