@@ -194,6 +194,7 @@ EOF
 # env_eval_expand <var-name> <text-to-expand> <arg1> <arg2> ...
 # expands <text-to-expand> with the same rules of an heredoc, interpreting variables, command substitution, etc. arg1, arg2 are passed as positional parameters $1, $2, etc.
 # returns cat error code, handles trailing \+EOF, keeps trailing newlines
+# <var-name> is not proteced against error
 env_eval_expand()
 {
   [ "$#" -ge "2" ] || return 1
@@ -205,6 +206,42 @@ x
 EOF_972364927347827384671231827319283918729387981237
 )' '&&' "${1}=\${${1}%x}" '&&' "${1}=\${${1}%
 }"
+}
+
+env_eval_expand2()
+{
+  [ "$#" -ge "2" ] || return 1
+  case "$1" in ""|[0123456789]*|*[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_]*) return 2;; esac
+
+  eval "$(
+    if _env_eval_value="$(
+      eval 'shift 2; cat << EOF_972364927347827384671231827319283918729387981237
+'"${2}"'
+x
+EOF_972364927347827384671231827319283918729387981237
+'
+    )"
+    then
+      :
+    else
+      printf 'return %s' "$?"
+      exit 0
+    fi
+
+    _env_eval_value=${_env_eval_value%x}
+    _env_eval_value=${_env_eval_value%"
+"}
+
+    if _env_eval_quoted="$(quote "$_env_eval_value")"
+    then
+      :
+    else
+      printf 'return %s' "$?"
+      exit 0
+    fi
+
+    printf '%s=%s' "$1" "$_env_eval_quoted"
+  )"
 }
 
 #-------------------------------------------------------------------------------
