@@ -3,7 +3,7 @@
 # menu-ext: small terminal menu with a POSIX-sh implementation.
 #
 # Usage:
-#   menu-ext [-H header] [-F footer] -- item ...
+#   menu-ext [-H header] [-F footer] [-B bottom-footer] -- item ...
 #
 # Each item is either:
 #   text
@@ -14,14 +14,21 @@
 
 header=""
 footer=""
+bottom_footer=""
 tty_active="0"
 alt_screen="0"
+cursor_hidden="0"
 saved_tty=""
 
 usage()
 {
   printf '%s\n' \
-    'usage: menu-ext [-H header] [-F footer] -- item ...' \
+    'usage: menu-ext [-H header] [-F footer] [-B bottom-footer] -- item ...' \
+    '' \
+    'options:' \
+    '  -H text        header at the top of the screen' \
+    '  -F text        footer immediately after the last visible item' \
+    '  -B text        footer anchored at the bottom of the screen' \
     '' \
     'item forms:' \
     '  text           display and return text' \
@@ -29,6 +36,7 @@ usage()
     '' \
     'keys:' \
     '  Up/Down, k/j   move' \
+    '  PageUp/PageDown move by one page' \
     '  Enter          select' \
     '  q, Esc         cancel'
 }
@@ -43,6 +51,11 @@ cleanup()
     if [ "$alt_screen" = "1" ]
     then
       tput rmcup >&3 2>/dev/null || :
+    fi
+
+    if [ "$cursor_hidden" = "1" ]
+    then
+      tput cnorm >&3 2>/dev/null || :
     fi
 
     tty_active="0"
@@ -108,14 +121,61 @@ read_byte_timed()
   [ -n "$byte" ]
 }
 
-read_key()
+read_csi_key()
+{
+  csi_parameter=""
+
+  while :
+  do
+    if [ "$byte" -ge 64 ] && [ "$byte" -le 126 ]
+    then
+      case "$byte" in
+        65)
+          key="up"
+          ;;
+        66)
+          key="down"
+          ;;
+        126)
+          case "$csi_parameter" in
+            5) key="pageup" ;;
+            6) key="pagedown" ;;
+            *)  key="other" ;;
+          esac
+          ;;
+        *)
+          key="other"
+          ;;
+      esac
+
+      return 0
+    fi
+
+    case "$byte" in
+      48) csi_parameter="${csi_parameter}0" ;;
+      49) csi_parameter="${csi_parameter}1" ;;
+      50) csi_parameter="${csi_parameter}2" ;;
+      51) csi_parameter="${csi_parameter}3" ;;
+      52) csi_parameter="${csi_parameter}4" ;;
+      53) csi_parameter="${csi_parameter}5" ;;
+      54) csi_parameter="${csi_parameter}6" ;;
+      55) csi_parameter="${csi_parameter}7" ;;
+      56) csi_parameter="${csi_parameter}8" ;;
+      57) csi_parameter="${csi_parameter}9" ;;
+      59) csi_parameter="${csi_parameter};" ;;
+    esac
+
+    if ! read_byte_timed
+    then
+      key="escape"
+      return 0
+    fi
+  done
+}
+
+read_key_from_byte()
 {
   key=""
-
-  if ! read_byte
-  then
-    return 1
-  fi
 
   case "$byte" in
     10|13)
@@ -129,7 +189,16 @@ read_key()
       fi
 
       case "$byte" in
-        91|79)
+        91)
+          if ! read_byte_timed
+          then
+            key="escape"
+            return 0
+          fi
+
+          read_csi_key
+          ;;
+        79)
           if ! read_byte_timed
           then
             key="escape"
@@ -164,6 +233,31 @@ read_key()
   return 0
 }
 
+read_key()
+{
+  if ! read_byte
+  then
+    return 1
+  fi
+
+  read_key_from_byte
+}
+
+read_key_nowait()
+{
+  stty min 0 time 0 <&3 2>/dev/null || return 1
+  read_byte
+  status="$?"
+  stty min 1 time 0 <&3 2>/dev/null || return 1
+
+  if [ "$status" -ne 0 ]
+  then
+    return 1
+  fi
+
+  read_key_from_byte
+}
+
 update_geometry()
 {
   term_lines="$(tput lines 2>/dev/null)" || fail 'cannot read terminal height'
@@ -179,7 +273,8 @@ update_geometry()
 
   header_lines="$(line_count "$header")"
   footer_lines="$(line_count "$footer")"
-  visible_rows="$((term_lines - header_lines - footer_lines))"
+  bottom_footer_lines="$(line_count "$bottom_footer")"
+  visible_rows="$((term_lines - header_lines - footer_lines - bottom_footer_lines))"
 
   if [ "$visible_rows" -lt 1 ] || [ "$term_cols" -lt 3 ]
   then
@@ -200,14 +295,22 @@ render_menu()
     print_block "$header" "$term_cols" "1"
   fi
 
+  remaining="$((item_count - top))"
+  if [ "$remaining" -lt "$visible_rows" ]
+  then
+    render_rows="$remaining"
+  else
+    render_rows="$visible_rows"
+  fi
+
   index="0"
   row="0"
-  last_row="$((visible_rows - 1))"
+  last_menu_row="$((render_rows - 1))"
   text_width="$((term_cols - 2))"
 
   for item
   do
-    if [ "$index" -ge "$top" ] && [ "$row" -lt "$visible_rows" ]
+    if [ "$index" -ge "$top" ] && [ "$row" -lt "$render_rows" ]
     then
       split_item "$item"
       text="$(printf '%s\n' "$item_text" | cut -c "1-$text_width")"
@@ -221,7 +324,7 @@ render_menu()
         printf '  %s' "$text" >&3
       fi
 
-      if [ -n "$footer" ] || [ "$row" -lt "$last_row" ]
+      if [ "$row" -lt "$last_menu_row" ] || [ -n "$footer" ]
       then
         printf '\n' >&3
       fi
@@ -232,20 +335,19 @@ render_menu()
     index="$((index + 1))"
   done
 
-  while [ "$row" -lt "$visible_rows" ]
-  do
-    if [ -n "$footer" ] || [ "$row" -lt "$last_row" ]
-    then
-      printf '\n' >&3
-    fi
-
-    row="$((row + 1))"
-  done
-
   if [ -n "$footer" ]
   then
     print_block "$footer" "$term_cols" "0"
   fi
+
+  if [ -n "$bottom_footer" ]
+  then
+    bottom_footer_row="$((term_lines - bottom_footer_lines))"
+    tput cup "$bottom_footer_row" 0 >&3 2>/dev/null || fail 'terminal does not support cursor positioning'
+    print_block "$bottom_footer" "$term_cols" "0"
+  fi
+
+  tput cup 0 0 >&3 2>/dev/null || fail 'terminal does not support cursor positioning'
 }
 
 selected_value()
@@ -269,7 +371,69 @@ selected_value()
   return 1
 }
 
-while getopts ':H:F:h' option
+apply_key()
+{
+  action=""
+
+  case "$key" in
+    up)
+      if [ "$selected" -gt 0 ]
+      then
+        selected="$((selected - 1))"
+        action="move"
+      fi
+      ;;
+    down)
+      if [ "$selected" -lt "$((item_count - 1))" ]
+      then
+        selected="$((selected + 1))"
+        action="move"
+      fi
+      ;;
+    pageup)
+      page_step="$((visible_rows - 1))"
+      if [ "$page_step" -lt 1 ]
+      then
+        page_step="1"
+      fi
+
+      if [ "$selected" -gt 0 ]
+      then
+        selected="$((selected - page_step))"
+        if [ "$selected" -lt 0 ]
+        then
+          selected="0"
+        fi
+        action="move"
+      fi
+      ;;
+    pagedown)
+      page_step="$((visible_rows - 1))"
+      if [ "$page_step" -lt 1 ]
+      then
+        page_step="1"
+      fi
+
+      if [ "$selected" -lt "$((item_count - 1))" ]
+      then
+        selected="$((selected + page_step))"
+        if [ "$selected" -gt "$((item_count - 1))" ]
+        then
+          selected="$((item_count - 1))"
+        fi
+        action="move"
+      fi
+      ;;
+    enter)
+      action="select"
+      ;;
+    quit|escape)
+      action="cancel"
+      ;;
+  esac
+}
+
+while getopts ':H:F:B:h' option
 do
   case "$option" in
     H)
@@ -277,6 +441,9 @@ do
       ;;
     F)
       footer="$OPTARG"
+      ;;
+    B)
+      bottom_footer="$OPTARG"
       ;;
     h)
       usage
@@ -356,50 +523,73 @@ then
   alt_screen="1"
 fi
 
+if tput civis >&3 2>/dev/null
+then
+  cursor_hidden="1"
+fi
+
 item_count="$#"
 selected="0"
 top="0"
+render_needed="1"
 
 while :
 do
-  update_geometry
+  if [ "$render_needed" = "1" ]
+  then
+    update_geometry
 
-  if [ "$selected" -lt "$top" ]
-  then
-    top="$selected"
-  elif [ "$selected" -ge "$((top + visible_rows))" ]
-  then
-    top="$((selected - visible_rows + 1))"
+    if [ "$selected" -lt "$top" ]
+    then
+      top="$selected"
+    elif [ "$selected" -ge "$((top + visible_rows))" ]
+    then
+      top="$((selected - visible_rows + 1))"
+    fi
+
+    render_menu "$selected" "$top" "$@"
+    render_needed="0"
   fi
-
-  render_menu "$selected" "$top" "$@"
 
   if ! read_key
   then
     fail 'cannot read from terminal'
   fi
 
-  case "$key" in
-    up)
-      if [ "$selected" -gt 0 ]
-      then
-        selected="$((selected - 1))"
-      fi
-      ;;
-    down)
-      if [ "$selected" -lt "$((item_count - 1))" ]
-      then
-        selected="$((selected + 1))"
-      fi
-      ;;
-    enter)
+  apply_key
+
+  case "$action" in
+    select)
       cleanup
       selected_value "$selected" "$@" || fail 'cannot resolve selection'
       exit 0
       ;;
-    quit|escape)
+    cancel)
       cleanup
       exit 1
+      ;;
+    move)
+      pending="0"
+      while [ "$pending" -lt 64 ] && read_key_nowait
+      do
+        apply_key
+
+        case "$action" in
+          select)
+            cleanup
+            selected_value "$selected" "$@" || fail 'cannot resolve selection'
+            exit 0
+            ;;
+          cancel)
+            cleanup
+            exit 1
+            ;;
+        esac
+
+        pending="$((pending + 1))"
+      done
+
+      render_needed="1"
       ;;
   esac
 done
