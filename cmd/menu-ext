@@ -83,7 +83,15 @@ line_count()
 print_block()
 {
   printf '%s\n' "$1" |
-    awk -v width="$2" '{ print substr($0, 1, width) }' >&3
+    awk -v width="$2" -v trailing_newline="$3" '
+      NR > 1 { printf "\n" }
+      { printf "%s", substr($0, 1, width) }
+      END {
+        if (trailing_newline == "1") {
+          printf "\n"
+        }
+      }
+    ' >&3
 }
 
 read_byte()
@@ -189,11 +197,12 @@ render_menu()
 
   if [ -n "$header" ]
   then
-    print_block "$header" "$term_cols"
+    print_block "$header" "$term_cols" "1"
   fi
 
   index="0"
   row="0"
+  last_row="$((visible_rows - 1))"
   text_width="$((term_cols - 2))"
 
   for item
@@ -208,9 +217,13 @@ render_menu()
         tput rev >&3 2>/dev/null || :
         printf '> %s' "$text" >&3
         tput sgr0 >&3 2>/dev/null || :
-        printf '\n' >&3
       else
-        printf '  %s\n' "$text" >&3
+        printf '  %s' "$text" >&3
+      fi
+
+      if [ -n "$footer" ] || [ "$row" -lt "$last_row" ]
+      then
+        printf '\n' >&3
       fi
 
       row="$((row + 1))"
@@ -221,13 +234,17 @@ render_menu()
 
   while [ "$row" -lt "$visible_rows" ]
   do
-    printf '\n' >&3
+    if [ -n "$footer" ] || [ "$row" -lt "$last_row" ]
+    then
+      printf '\n' >&3
+    fi
+
     row="$((row + 1))"
   done
 
   if [ -n "$footer" ]
   then
-    print_block "$footer" "$term_cols"
+    print_block "$footer" "$term_cols" "0"
   fi
 }
 
