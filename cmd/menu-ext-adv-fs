@@ -1,0 +1,547 @@
+#!/bin/sh
+
+# menu-ext-adv-fs: filesystem browser built on menu-ext-adv.
+#
+# Usage:
+#   menu-ext-adv-fs [-H header] [-F footer] [-B bottom-footer]
+#                   [-K key ...] [-n] [-m] -- path
+#
+# A configured key returns:
+#   key@:=absolute-selected-path
+#
+# Escape always cancels. Navigation keys and Enter are reserved.
+
+header=""
+footer=""
+bottom_footer=""
+custom_keys=""
+show_hidden="1"
+mixed_sort="0"
+newline='
+'
+menu_command=""
+current_path=""
+menu_names=""
+
+usage()
+{
+  printf '%s\n' \
+    'usage: menu-ext-adv-fs [-H header] [-F footer] [-B bottom-footer] -K key [-K key ...] [-n] [-m] -- path' \
+    '' \
+    'options:' \
+    '  -H text        header at the top of the screen' \
+    '  -F text        footer immediately after the last visible item' \
+    '  -B text        footer anchored at the bottom of the screen' \
+    '  -K key         configured action key; may be repeated' \
+    '  -n             do not show hidden entries' \
+    '  -m             mix directories and other entries in one alphabetical list' \
+    '' \
+    'custom key forms:' \
+    '  x              one printable ASCII character' \
+    '  space          Space' \
+    '  tab            Tab' \
+    '  backspace      Backspace' \
+    '  delete         Delete' \
+    '  insert         Insert' \
+    '  arrow_left     Left arrow' \
+    '  arrow_right    Right arrow' \
+    '  f1 ... f20     function keys' \
+    '' \
+    'reserved keys:' \
+    '  esc            cancel' \
+    '  enter          enter selected directory' \
+    '  arrow_up       move up' \
+    '  arrow_down     move down' \
+    '  pageup         move one page up' \
+    '  pagedown       move one page down' \
+    '  home           move to first item' \
+    '  end            move to last item'
+}
+
+fail()
+{
+  printf 'menu-ext-adv-fs: %s\n' "$1" >&2
+  exit 2
+}
+
+key_is_reserved()
+{
+  case "$1" in
+    esc|enter|arrow_up|arrow_down|pageup|pagedown|home|end)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+key_is_named_custom()
+{
+  case "$1" in
+    space|tab|backspace|delete|insert|arrow_left|arrow_right|f1|f2|f3|f4|f5|f6|f7|f8|f9|f10|f11|f12|f13|f14|f15|f16|f17|f18|f19|f20)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+custom_key_is_configured()
+{
+  case "$newline$custom_keys$newline" in
+    *"$newline$1$newline"*)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+validate_custom_key()
+{
+  candidate="$1"
+
+  if key_is_reserved "$candidate"
+  then
+    fail "key is reserved: $candidate"
+  fi
+
+  if key_is_named_custom "$candidate"
+  then
+    return 0
+  fi
+
+  candidate_size="$(LC_ALL=C printf '%s' "$candidate" | wc -c | tr -d '[:space:]')"
+  if [ "$candidate_size" != "1" ]
+  then
+    fail "invalid custom key: $candidate"
+  fi
+
+  candidate_byte="$(LC_ALL=C printf '%s' "$candidate" | od -A n -t u1 | tr -d '[:space:]')"
+  case "$candidate_byte" in
+    ''|*[!0-9]*) fail "invalid custom key: $candidate" ;;
+  esac
+
+  if [ "$candidate_byte" -eq 32 ]
+  then
+    fail 'use key alias space instead of a literal space'
+  fi
+
+  if [ "$candidate_byte" -lt 33 ] || [ "$candidate_byte" -gt 126 ]
+  then
+    fail "invalid custom key: $candidate"
+  fi
+}
+
+add_custom_key()
+{
+  validate_custom_key "$1"
+
+  if custom_key_is_configured "$1"
+  then
+    fail "duplicate custom key: $1"
+  fi
+
+  if [ -z "$custom_keys" ]
+  then
+    custom_keys="$1"
+  else
+    custom_keys="$custom_keys$newline$1"
+  fi
+}
+
+find_menu_command()
+{
+  case "$0" in
+    */*)
+      command_dir="${0%/*}"
+      [ -n "$command_dir" ] || command_dir="/"
+      if [ -x "$command_dir/menu-ext-adv" ]
+      then
+        menu_command="$command_dir/menu-ext-adv"
+        return 0
+      fi
+      ;;
+  esac
+
+  menu_command="$(command -v menu-ext-adv 2>/dev/null)" || return 1
+  [ -n "$menu_command" ]
+}
+
+canonicalize_directory()
+{
+  candidate_path="$1"
+
+  case "$candidate_path" in
+    -*) candidate_path="./$candidate_path" ;;
+  esac
+
+  (
+    CDPATH=
+    export CDPATH
+    cd -P "$candidate_path" 2>/dev/null || exit 1
+    pwd -P
+  )
+}
+
+append_dir_name()
+{
+  if [ -z "$dir_names" ]
+  then
+    dir_names="$1"
+  else
+    dir_names="$dir_names$newline$1"
+  fi
+}
+
+append_other_name()
+{
+  if [ -z "$other_names" ]
+  then
+    other_names="$1"
+  else
+    other_names="$other_names$newline$1"
+  fi
+}
+
+add_entry()
+{
+  entry_path="$1"
+
+  if [ ! -e "$entry_path" ] && [ ! -L "$entry_path" ]
+  then
+    return 0
+  fi
+
+  entry_name="${entry_path##*/}"
+  case "$entry_name" in
+    *"$newline"*) fail "entry name contains a newline: $entry_name" ;;
+  esac
+
+  if [ -d "$entry_path" ]
+  then
+    append_dir_name "$entry_name"
+  else
+    append_other_name "$entry_name"
+  fi
+}
+
+sort_names()
+{
+  if [ -z "$1" ]
+  then
+    return 0
+  fi
+
+  LC_ALL=C printf '%s\n' "$1" | LC_ALL=C sort
+}
+
+build_menu()
+{
+  dir_names=""
+  other_names=""
+
+  for entry_path in "$current_path"/*
+  do
+    add_entry "$entry_path"
+  done
+
+  if [ "$show_hidden" = "1" ]
+  then
+    for entry_path in "$current_path"/.[!.]* "$current_path"/..?*
+    do
+      add_entry "$entry_path"
+    done
+  fi
+
+  dir_names="$(sort_names "$dir_names")"
+  other_names="$(sort_names "$other_names")"
+
+  if [ "$mixed_sort" = "1" ]
+  then
+    if [ -n "$dir_names" ] && [ -n "$other_names" ]
+    then
+      menu_names="$(sort_names "$dir_names$newline$other_names")"
+    elif [ -n "$dir_names" ]
+    then
+      menu_names="$dir_names"
+    else
+      menu_names="$other_names"
+    fi
+  else
+    if [ -n "$dir_names" ] && [ -n "$other_names" ]
+    then
+      menu_names="$dir_names$newline$other_names"
+    elif [ -n "$dir_names" ]
+    then
+      menu_names="$dir_names"
+    else
+      menu_names="$other_names"
+    fi
+  fi
+
+  if [ "$current_path" != "/" ]
+  then
+    if [ -n "$menu_names" ]
+    then
+      menu_names="..$newline$menu_names"
+    else
+      menu_names=".."
+    fi
+  fi
+}
+
+wrap_path()
+{
+  printf '%s\n' "$1" |
+    awk -v width="$2" '
+      {
+        line = $0
+        if (line == "") {
+          print ""
+          next
+        }
+        while (length(line) > width) {
+          print substr(line, 1, width)
+          line = substr(line, width + 1)
+        }
+        print line
+      }
+    '
+}
+
+resolve_name()
+{
+  wanted_index="$1"
+  selected_name=""
+  index="0"
+  old_ifs="$IFS"
+  IFS="$newline"
+  set -f
+
+  for candidate_name in $menu_names
+  do
+    if [ "$index" -eq "$wanted_index" ]
+    then
+      selected_name="$candidate_name"
+      break
+    fi
+    index="$((index + 1))"
+  done
+
+  set +f
+  IFS="$old_ifs"
+  [ -n "$selected_name" ]
+}
+
+selected_absolute_path()
+{
+  if [ "$selected_name" = ".." ]
+  then
+    canonicalize_directory "$current_path/.."
+    return "$?"
+  fi
+
+  if [ "$current_path" = "/" ]
+  then
+    printf '/%s\n' "$selected_name"
+  else
+    printf '%s/%s\n' "$current_path" "$selected_name"
+  fi
+}
+
+invoke_menu()
+{
+  term_cols="$(tput cols 2>/dev/null)" || fail 'cannot read terminal width'
+  case "$term_cols" in
+    ''|*[!0-9]*|0) fail 'invalid terminal width' ;;
+  esac
+
+  wrapped_path="$(wrap_path "$current_path" "$term_cols")"
+  if [ -n "$header" ]
+  then
+    display_header="$header$newline$wrapped_path"
+  else
+    display_header="$wrapped_path"
+  fi
+
+  set -- -H "$display_header"
+
+  if [ -n "$footer" ]
+  then
+    set -- "$@" -F "$footer"
+  fi
+
+  if [ -n "$bottom_footer" ]
+  then
+    set -- "$@" -B "$bottom_footer"
+  fi
+
+  old_ifs="$IFS"
+  IFS="$newline"
+  set -f
+  for configured_key in $custom_keys
+  do
+    set -- "$@" -K "$configured_key"
+  done
+  set +f
+  IFS="$old_ifs"
+
+  set -- "$@" -K enter --
+
+  index="0"
+  old_ifs="$IFS"
+  IFS="$newline"
+  set -f
+  for entry_name in $menu_names
+  do
+    set -- "$@" "$index@:=$entry_name"
+    index="$((index + 1))"
+  done
+  set +f
+  IFS="$old_ifs"
+
+  if [ "$index" -eq 0 ]
+  then
+    fail 'directory contains no selectable entries'
+  fi
+
+  "$menu_command" "$@"
+}
+
+while getopts ':H:F:B:K:nmh' option
+do
+  case "$option" in
+    H)
+      header="$OPTARG"
+      ;;
+    F)
+      footer="$OPTARG"
+      ;;
+    B)
+      bottom_footer="$OPTARG"
+      ;;
+    K)
+      add_custom_key "$OPTARG"
+      ;;
+    n)
+      show_hidden="0"
+      ;;
+    m)
+      mixed_sort="1"
+      ;;
+    h)
+      usage
+      exit 0
+      ;;
+    :)
+      fail "option -$OPTARG requires an argument"
+      ;;
+    \?)
+      fail "unknown option: -$OPTARG"
+      ;;
+  esac
+done
+
+if [ -z "$custom_keys" ]
+then
+  fail 'at least one -K custom key is required'
+fi
+
+delimiter_index="$((OPTIND - 1))"
+index="1"
+delimiter_seen="0"
+for argument
+do
+  if [ "$index" -eq "$delimiter_index" ]
+  then
+    if [ "$argument" = "--" ]
+    then
+      delimiter_seen="1"
+    fi
+    break
+  fi
+  index="$((index + 1))"
+done
+
+shift "$delimiter_index"
+
+if [ "$delimiter_seen" != "1" ]
+then
+  fail 'missing -- before path'
+fi
+
+if [ "$#" -ne 1 ]
+then
+  fail 'exactly one path is required'
+fi
+
+case "$1" in
+  *"$newline"*) fail 'path must not contain a newline' ;;
+esac
+
+current_path="$(canonicalize_directory "$1")" || fail "invalid or inaccessible directory: $1"
+case "$current_path" in
+  *"$newline"*) fail 'resolved path must not contain a newline' ;;
+esac
+
+if ! find_menu_command
+then
+  fail 'menu-ext-adv is required next to this command or in PATH'
+fi
+
+if ! command -v tput >/dev/null 2>&1
+then
+  fail 'tput is required'
+fi
+
+while :
+do
+  build_menu
+
+  result="$(invoke_menu)"
+  status="$?"
+
+  case "$status" in
+    0)
+      ;;
+    1)
+      exit 1
+      ;;
+    *)
+      exit "$status"
+      ;;
+  esac
+
+  case "$result" in
+    *@:=*)
+      pressed_key="${result%%@:=*}"
+      selected_index="${result#*@:=}"
+      ;;
+    *)
+      fail 'invalid result from menu-ext-adv'
+      ;;
+  esac
+
+  case "$selected_index" in
+    ''|*[!0-9]*) fail 'invalid selection from menu-ext-adv' ;;
+  esac
+
+  resolve_name "$selected_index" || fail 'cannot resolve selected entry'
+  selected_path="$(selected_absolute_path)" || fail 'cannot resolve selected path'
+
+  if [ "$pressed_key" = "enter" ]
+  then
+    if [ -d "$selected_path" ]
+    then
+      current_path="$(canonicalize_directory "$selected_path")" || fail "cannot enter directory: $selected_path"
+      case "$current_path" in
+        *"$newline"*) fail 'resolved path must not contain a newline' ;;
+      esac
+    fi
+    continue
+  fi
+
+  printf '%s@:=%s\n' "$pressed_key" "$selected_path"
+  exit 0
+done
