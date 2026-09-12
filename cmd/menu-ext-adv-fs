@@ -11,6 +11,8 @@
 #
 # Escape always cancels. Navigation keys and Enter are reserved.
 
+. term.lib.sh
+
 header=""
 footer=""
 bottom_footer=""
@@ -352,10 +354,7 @@ selected_absolute_path()
 
 invoke_menu()
 {
-  term_cols="$(tput cols 2>/dev/null)" || fail 'cannot read terminal width'
-  case "$term_cols" in
-    ''|*[!0-9]*|0) fail 'invalid terminal width' ;;
-  esac
+  term_size_update || fail 'cannot read terminal size'
 
   wrapped_path="$(wrap_path "$current_path" "$term_cols")"
   if [ -n "$header" ]
@@ -488,11 +487,6 @@ esac
 if ! find_menu_command
 then
   fail 'menu-ext-adv is required next to this command or in PATH'
-fi
-
-if ! command -v tput >/dev/null 2>&1
-then
-  fail 'tput is required'
 fi
 
 while :
