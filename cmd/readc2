@@ -1,8 +1,19 @@
 #!/bin/sh
 
-. term.lib.sh
+LC_ALL=C
+export LC_ALL
 
-keypad_enabled=false
+tty_device=/dev/tty
+readonly tty_device
+
+interbyte_time=1
+readonly interbyte_time
+
+tty_saved=
+keypad=0
+keymap=
+
+#-------------------------------------------------------------------------------
 
 cleanup()
 {
@@ -10,21 +21,121 @@ cleanup()
 
   trap - 0 HUP INT QUIT TERM PIPE TSTP
 
-  if [ "$keypad_enabled" = "true" ]
+  if [ "$keypad" -eq 1 ]
   then
-    term_keypad_disable >/dev/null 2>&1 || :
+    command -p tput rmkx 2>/dev/null > "$tty_device" || :
   fi
 
-  if [ "${term_tty_saved-}" = "true" ]
+  if [ -n "$tty_saved" ]
   then
-    term_tty_restore >/dev/null 2>&1 || :
+    command -p stty "$tty_saved" 2>/dev/null < "$tty_device" || :
   fi
 
   exit "$status"
 }
 
-term_tty_save || {
+#-------------------------------------------------------------------------------
+
+read_byte()
+{
+  byte="$(
+    command -p dd bs=1 count=1 2>/dev/null < "$tty_device"
+    status=$?
+    printf 'x'
+    exit "$status"
+  )" || return 1
+
+  byte=${byte%x}
+}
+
+#-------------------------------------------------------------------------------
+
+hex_of()
+{
+  printf '%s' "$1" |
+    command -p od -A n -t x1 |
+    command -p tr -d ' \n'
+}
+
+#-------------------------------------------------------------------------------
+
+map_add()
+{
+  while IFS=: read -r hex name
+  do
+    [ "$hex" = "$1" ] && return 0
+  done << EOF
+$keymap
+EOF
+
+  keymap="${keymap}${keymap:+
+}$1:$2"
+}
+
+#-------------------------------------------------------------------------------
+
+cap_add()
+{
+  value="$(command -p tput "$1" 2>/dev/null; printf 'x')"
+  value=${value%x}
+
+  [ -n "$value" ] || return 0
+
+  hex="$(hex_of "$value")" || return 1
+
+  map_add "$hex" "$2"
+}
+
+#-------------------------------------------------------------------------------
+
+map_lookup()
+{
+  key_name=
+
+  while IFS=: read -r hex name
+  do
+    if [ "$hex" = "$1" ]
+    then
+      key_name=$name
+      return 0
+    fi
+  done << EOF
+$keymap
+EOF
+
+  return 1
+}
+
+#-------------------------------------------------------------------------------
+
+map_has_longer()
+{
+  while IFS=: read -r hex name
+  do
+    case "$hex" in
+      "$1"*)
+        [ "$hex" != "$1" ] && return 0
+        ;;
+    esac
+  done << EOF
+$keymap
+EOF
+
+  return 1
+}
+
+#-------------------------------------------------------------------------------
+# TERMINAL INITIALIZATION
+#-------------------------------------------------------------------------------
+
+# Saving the state also verifies that a controlling terminal is available.
+tty_saved="$(command -p stty -g 2>/dev/null < "$tty_device")" || {
   printf '%s\n' 'readc: no controlling terminal' >&2
+  exit 1
+}
+
+[ -n "$tty_saved" ] || {
+  printf '%s\n' 'readc: cannot read terminal state' >&2
   exit 1
 }
 
@@ -36,52 +147,259 @@ trap 'exit 143' TERM
 trap 'exit 141' PIPE
 trap 'exit 148' TSTP
 
-if ! command -v tput >/dev/null 2>&1 ||
-   [ -z "${TERM-}" ] ||
-   [ "$TERM" = "dumb" ] ||
-   ! tput cols >/dev/null 2>&1
-then
+# Check that TERM has a usable terminfo entry.
+command -p tput cols >/dev/null 2>&1 || {
   printf '%s\n' 'readc: TERM/terminfo unavailable' >&2
   exit 1
-fi
+}
 
-term_tty_blocking || exit 1
-term_keymap_init || exit 1
+# Non-canonical, blocking, no echo.
+command -p stty \
+  -echo \
+  -icanon \
+  min 1 \
+  time 0 \
+  2>/dev/null < "$tty_device" || exit 1
 
-if term_keypad_enable
+# Enable application/keypad transmission when supported.
+if command -p tput smkx 2>/dev/null > "$tty_device"
 then
-  keypad_enabled=true
+  keypad=1
 fi
 
-term_read_key
-status=$?
+#-------------------------------------------------------------------------------
+# TERMINFO KEY MAP
+#-------------------------------------------------------------------------------
 
-case "$status" in
-  0)
-    ;;
-  3)
-    printf '%s\n' 'readc: no input available' >&2
-    exit 1
-    ;;
-  *)
-    printf '%s\n' 'readc: cannot read terminal input' >&2
-    exit 1
+cap_add kbs   backspace
+cap_add kent  enter
+cap_add kcbt  backtab
+
+cap_add kcuu1 up
+cap_add kcud1 down
+cap_add kcub1 left
+cap_add kcuf1 right
+
+cap_add khome home
+cap_add kend  end
+
+cap_add kich1 insert
+cap_add kdch1 delete
+
+cap_add kpp   pageup
+cap_add knp   pagedown
+
+f=1
+while [ "$f" -le 20 ]
+do
+  cap_add "kf$f" "f$f"
+  f=$((f + 1))
+done
+
+# Terminal-independent control characters.
+#
+# Terminfo entries were added first, so an explicit terminal definition
+# takes precedence over these generic fallbacks.
+
+map_add 08 backspace
+map_add 09 tab
+map_add 0a enter
+map_add 0d enter
+map_add 1b escape
+map_add 7f backspace
+
+#-------------------------------------------------------------------------------
+# FIRST BYTE
+#-------------------------------------------------------------------------------
+
+read_byte || exit 1
+
+# POSIX shell variables cannot contain NUL.
+# The first read is blocking, therefore an empty value here represents NUL.
+if [ -z "$byte" ]
+then
+  printf '%s\n' nul
+  exit 0
+fi
+
+key=$byte
+key_hex="$(hex_of "$key")" || exit 1
+
+if map_lookup "$key_hex"
+then
+  exact=$key_name
+else
+  exact=
+fi
+
+#-------------------------------------------------------------------------------
+# TERMINAL SEQUENCE
+#-------------------------------------------------------------------------------
+
+if map_has_longer "$key_hex"
+then
+  # Further bytes are read with an inter-byte timeout. This distinguishes
+  # standalone Escape from an escape/function-key sequence.
+  command -p stty \
+    -echo \
+    -icanon \
+    min 0 \
+    time "$interbyte_time" \
+    2>/dev/null < "$tty_device" || exit 1
+
+  while map_has_longer "$key_hex"
+  do
+    read_byte || exit 1
+
+    # Empty here means timeout.
+    [ -n "$byte" ] || break
+
+    key=$key$byte
+
+    byte_hex="$(hex_of "$byte")" || exit 1
+    key_hex=$key_hex$byte_hex
+
+    if map_lookup "$key_hex"
+    then
+      exact=$key_name
+    else
+      exact=
+    fi
+
+    if [ -z "$exact" ] && ! map_has_longer "$key_hex"
+    then
+      printf '%s\n' \
+        "readc: unknown terminal sequence: $key_hex" >&2
+
+      exit 2
+    fi
+  done
+
+  if [ -n "$exact" ]
+  then
+    printf '%s\n' "$exact"
+    exit 0
+  fi
+
+  printf '%s\n' \
+    "readc: incomplete terminal sequence: $key_hex" >&2
+
+  exit 2
+fi
+
+#-------------------------------------------------------------------------------
+# SINGLE-BYTE SPECIAL KEY
+#-------------------------------------------------------------------------------
+
+if [ -n "$exact" ]
+then
+  printf '%s\n' "$exact"
+  exit 0
+fi
+
+#-------------------------------------------------------------------------------
+# PRINTABLE ASCII
+#-------------------------------------------------------------------------------
+
+case "$key_hex" in
+  2[0-9a-f]|[3-6][0-9a-f]|7[0-e])
+    printf '%s\n' "$key"
+    exit 0
     ;;
 esac
 
-case "$term_key" in
-  text)
-    printf '%s\n' "$term_key_text"
+#-------------------------------------------------------------------------------
+# UTF-8
+#-------------------------------------------------------------------------------
+
+first_hex=$key_hex
+
+case "$first_hex" in
+  c[2-9a-f]|d[0-9a-f])
+    remaining=1
     ;;
-  unknown)
-    printf 'readc: unknown terminal sequence: %s\n' "$term_key_hex" >&2
-    exit 2
+
+  e[0-9a-f])
+    remaining=2
     ;;
-  control)
-    printf 'readc: unsupported input byte: %s\n' "$term_key_hex" >&2
-    exit 2
+
+  f[0-4])
+    remaining=3
     ;;
+
   *)
-    printf '%s\n' "$term_key"
+    printf '%s\n' \
+      "readc: unsupported input byte: $first_hex" >&2
+
+    exit 2
     ;;
 esac
+
+command -p stty \
+  -echo \
+  -icanon \
+  min 0 \
+  time "$interbyte_time" \
+  2>/dev/null < "$tty_device" || exit 1
+
+position=2
+
+while [ "$remaining" -gt 0 ]
+do
+  read_byte || exit 1
+
+  [ -n "$byte" ] || {
+    printf '%s\n' 'readc: incomplete UTF-8 character' >&2
+    exit 2
+  }
+
+  byte_hex="$(hex_of "$byte")" || exit 1
+
+  case "$byte_hex" in
+    [89ab][0-9a-f])
+      ;;
+
+    *)
+      printf '%s\n' 'readc: invalid UTF-8 character' >&2
+      exit 2
+      ;;
+  esac
+
+  # Additional restrictions on the second byte prevent:
+  #
+  # - overlong sequences;
+  # - UTF-16 surrogate code points;
+  # - values above U+10FFFF.
+
+  if [ "$position" -eq 2 ]
+  then
+    case "$first_hex:$byte_hex" in
+      e0:8[0-9a-f]|e0:9[0-9a-f])
+        printf '%s\n' 'readc: invalid UTF-8 character' >&2
+        exit 2
+        ;;
+
+      ed:a[0-9a-f]|ed:b[0-9a-f])
+        printf '%s\n' 'readc: invalid UTF-8 character' >&2
+        exit 2
+        ;;
+
+      f0:8[0-9a-f])
+        printf '%s\n' 'readc: invalid UTF-8 character' >&2
+        exit 2
+        ;;
+
+      f4:9[0-9a-f]|f4:a[0-9a-f]|f4:b[0-9a-f])
+        printf '%s\n' 'readc: invalid UTF-8 character' >&2
+        exit 2
+        ;;
+    esac
+  fi
+
+  key=$key$byte
+
+  remaining=$((remaining - 1))
+  position=$((position + 1))
+done
+
+printf '%s\n' "$key"
