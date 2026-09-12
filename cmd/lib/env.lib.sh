@@ -166,12 +166,15 @@ EOF_972364927347827384671231827319283918729387981237
 
 # env_eval3()
 # {
-#   [ "$#" -ge "2" ] || return 1
+#   [ "$#" -ge "1" ] || return 1
 #
-#   eval 'shift 2; cat << '"${2}"'
+#   (
+#     _eof="EOF_$(command -p -- date '+%Y%m%d_%H%M%S' 2>/dev/null)"
+#   eval 'shift; cat << '"$_eof"'
 # '"${1}"'
-# '"${2}"'
-# '
+#
+# '"$_eof"
+#   )
 # }
 
 #-------------------------------------------------------------------------------
@@ -191,6 +194,8 @@ EOF
 )'
 }
 
+# maybe its best to use a middle function to pass unique EOF and a tmp var inside a subshell (quote?), or maybe...?
+
 # env_eval_expand <var-name> <text-to-expand> <arg1> <arg2> ...
 # expands <text-to-expand> with the same rules of an heredoc, interpreting variables, command substitution, etc. arg1, arg2 are passed as positional parameters $1, $2, etc.
 # returns cat error code, handles trailing \+EOF, keeps trailing newlines
@@ -208,6 +213,7 @@ EOF_972364927347827384671231827319283918729387981237
 }"
 }
 
+# depends on quote
 env_eval_expand2()
 {
   [ "$#" -ge "2" ] || return 1
