@@ -47,7 +47,7 @@
 #       Read and decode one key. Sets term_key, term_key_hex and, for text
 #       input, term_key_text. The caller should already have put the TTY in
 #       character mode with term_tty_blocking (normally after term_tty_save).
-#       Escape-sequence reads temporarily use timed mode.
+#       Escape-sequence and UTF-8 continuation reads temporarily use timed mode.
 #   term_read_secret [PROMPT]
 #       Read one line from the selected TTY with echo disabled and print it to
 #       stdout, restoring the exact previous TTY state before returning.
@@ -258,7 +258,26 @@ _term_read_continuation()
 {
   [ "$#" -eq 2 ] || return 2
 
-  term_read_byte || return 1
+  _term_cont_stty=$(stty -g < "$term_tty_device" 2>/dev/null) || return 1
+  term_tty_timed "$term_escape_time" || {
+    unset _term_cont_stty
+    return 1
+  }
+
+  term_read_byte
+  _term_cont_status=$?
+
+  stty "$_term_cont_stty" < "$term_tty_device" 2>/dev/null || {
+    unset _term_cont_stty _term_cont_status
+    return 1
+  }
+
+  [ "$_term_cont_status" -eq 0 ] || {
+    unset _term_cont_stty _term_cont_status
+    return 1
+  }
+
+  unset _term_cont_stty _term_cont_status
   [ "$term_byte_dec" -ge "$1" ] 2>/dev/null || return 1
   [ "$term_byte_dec" -le "$2" ] 2>/dev/null || return 1
   _term_append_current_byte
