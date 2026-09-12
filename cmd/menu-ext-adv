@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# menu-ext-adv: terminal menu with configurable action keys.
+# menu-ext-adv: terminal menu with configurable action keys, backed by menu.lib.sh.
 #
 # Usage:
 #   menu-ext-adv [-H header] [-F footer] [-B bottom-footer] -K key [-K key ...] -- item ...
@@ -13,16 +13,15 @@
 #   key@:=value
 #
 # Escape always cancels. Navigation keys are reserved and cannot be configured.
-# The terminal UI is written directly to /dev/tty; stdout is reserved for the result.
+# The terminal UI is handled by menu.lib.sh through term.lib.sh; stdout is
+# reserved for the result.
 
-header=""
-footer=""
-bottom_footer=""
-custom_keys=""
-tty_active="0"
-alt_screen="0"
-cursor_hidden="0"
-saved_tty=""
+. menu.lib.sh
+
+header=
+footer=
+bottom_footer=
+custom_key_count=0
 newline='
 '
 
@@ -63,30 +62,8 @@ usage()
     '  end            move to last item'
 }
 
-cleanup()
-{
-  if [ "$tty_active" = "1" ]
-  then
-    stty "$saved_tty" <&3 2>/dev/null || :
-    tput sgr0 >&3 2>/dev/null || :
-
-    if [ "$alt_screen" = "1" ]
-    then
-      tput rmcup >&3 2>/dev/null || :
-    fi
-
-    if [ "$cursor_hidden" = "1" ]
-    then
-      tput cnorm >&3 2>/dev/null || :
-    fi
-
-    tty_active="0"
-  fi
-}
-
 fail()
 {
-  cleanup
   printf 'menu-ext-adv: %s\n' "$1" >&2
   exit 2
 }
@@ -105,511 +82,97 @@ split_item()
   esac
 }
 
-line_count()
-{
-  if [ -z "$1" ]
-  then
-    printf '%s\n' '0'
-  else
-    printf '%s\n' "$1" | awk 'END { print NR }'
-  fi
-}
-
-print_block()
-{
-  printf '%s\n' "$1" |
-    awk -v width="$2" -v trailing_newline="$3" '
-      NR > 1 { printf "\n" }
-      { printf "%s", substr($0, 1, width) }
-      END {
-        if (trailing_newline == "1") {
-          printf "\n"
-        }
-      }
-    ' >&3
-}
-
-read_byte()
-{
-  byte="$(dd bs=1 count=1 <&3 2>/dev/null | od -A n -t u1 | tr -d '[:space:]')"
-  [ -n "$byte" ]
-}
-
-read_byte_timed()
-{
-  stty min 0 time 2 <&3 2>/dev/null || return 1
-  byte="$(dd bs=1 count=1 <&3 2>/dev/null | od -A n -t u1 | tr -d '[:space:]')"
-  stty min 1 time 0 <&3 2>/dev/null || return 1
-  [ -n "$byte" ]
-}
-
-read_csi_key()
-{
-  csi_parameter=""
-
-  while :
-  do
-    if [ "$byte" -ge 64 ] && [ "$byte" -le 126 ]
-    then
-      case "$byte" in
-        65) key="arrow_up" ;;
-        66) key="arrow_down" ;;
-        67) key="arrow_right" ;;
-        68) key="arrow_left" ;;
-        70) key="end" ;;
-        72) key="home" ;;
-        80) key="f1" ;;
-        81) key="f2" ;;
-        82) key="f3" ;;
-        83) key="f4" ;;
-        126)
-          case "$csi_parameter" in
-            1|7) key="home" ;;
-            2) key="insert" ;;
-            3) key="delete" ;;
-            4|8) key="end" ;;
-            5) key="pageup" ;;
-            6) key="pagedown" ;;
-            11) key="f1" ;;
-            12) key="f2" ;;
-            13) key="f3" ;;
-            14) key="f4" ;;
-            15) key="f5" ;;
-            17) key="f6" ;;
-            18) key="f7" ;;
-            19) key="f8" ;;
-            20) key="f9" ;;
-            21) key="f10" ;;
-            23) key="f11" ;;
-            24) key="f12" ;;
-            25) key="f13" ;;
-            26) key="f14" ;;
-            28) key="f15" ;;
-            29) key="f16" ;;
-            31) key="f17" ;;
-            32) key="f18" ;;
-            33) key="f19" ;;
-            34) key="f20" ;;
-            *)  key="other" ;;
-          esac
-          ;;
-        *)
-          key="other"
-          ;;
-      esac
-
-      return 0
-    fi
-
-    case "$byte" in
-      48) csi_parameter="${csi_parameter}0" ;;
-      49) csi_parameter="${csi_parameter}1" ;;
-      50) csi_parameter="${csi_parameter}2" ;;
-      51) csi_parameter="${csi_parameter}3" ;;
-      52) csi_parameter="${csi_parameter}4" ;;
-      53) csi_parameter="${csi_parameter}5" ;;
-      54) csi_parameter="${csi_parameter}6" ;;
-      55) csi_parameter="${csi_parameter}7" ;;
-      56) csi_parameter="${csi_parameter}8" ;;
-      57) csi_parameter="${csi_parameter}9" ;;
-      59) csi_parameter="${csi_parameter};" ;;
-    esac
-
-    if ! read_byte_timed
-    then
-      key="esc"
-      return 0
-    fi
-  done
-}
-
-read_key_from_byte()
-{
-  key=""
-
-  case "$byte" in
-    8|127)
-      key="backspace"
-      ;;
-    9)
-      key="tab"
-      ;;
-    10|13)
-      key="enter"
-      ;;
-    27)
-      if ! read_byte_timed
-      then
-        key="esc"
-        return 0
-      fi
-
-      case "$byte" in
-        91)
-          if ! read_byte_timed
-          then
-            key="esc"
-            return 0
-          fi
-          read_csi_key
-          ;;
-        79)
-          if ! read_byte_timed
-          then
-            key="esc"
-            return 0
-          fi
-          case "$byte" in
-            65) key="arrow_up" ;;
-            66) key="arrow_down" ;;
-            67) key="arrow_right" ;;
-            68) key="arrow_left" ;;
-            70) key="end" ;;
-            72) key="home" ;;
-            80) key="f1" ;;
-            81) key="f2" ;;
-            82) key="f3" ;;
-            83) key="f4" ;;
-            *)  key="other" ;;
-          esac
-          ;;
-        *)
-          key="esc"
-          ;;
-      esac
-      ;;
-    32)
-      key="space"
-      ;;
-    33|34|35|36|37|38|39|40|41|42|43|44|45|46|47|48|49|50|51|52|53|54|55|56|57|58|59|60|61|62|63|64|65|66|67|68|69|70|71|72|73|74|75|76|77|78|79|80|81|82|83|84|85|86|87|88|89|90|91|92|93|94|95|96|97|98|99|100|101|102|103|104|105|106|107|108|109|110|111|112|113|114|115|116|117|118|119|120|121|122|123|124|125|126)
-      key="$(awk -v n="$byte" 'BEGIN { printf "%c", n }')"
-      ;;
-    *)
-      key="other"
-      ;;
-  esac
-
-  return 0
-}
-
-read_key()
-{
-  if ! read_byte
-  then
-    return 1
-  fi
-
-  read_key_from_byte
-}
-
-read_key_nowait()
-{
-  stty min 0 time 0 <&3 2>/dev/null || return 1
-  read_byte
-  status="$?"
-  stty min 1 time 0 <&3 2>/dev/null || return 1
-
-  if [ "$status" -ne 0 ]
-  then
-    return 1
-  fi
-
-  read_key_from_byte
-}
-
-key_is_reserved()
+legacy_key_to_menu()
 {
   case "$1" in
     esc|arrow_up|arrow_down|pageup|pagedown|home|end)
-      return 0
+      fail "key is reserved: $1"
+      ;;
+    space)
+      mapped_key=' '
+      ;;
+    arrow_left)
+      mapped_key=left
+      ;;
+    arrow_right)
+      mapped_key=right
+      ;;
+    tab|enter|backspace|delete|insert|f1|f2|f3|f4|f5|f6|f7|f8|f9|f10|f11|f12|f13|f14|f15|f16|f17|f18|f19|f20)
+      mapped_key="$1"
+      ;;
+    *)
+      candidate_size="$(LC_ALL=C printf '%s' "$1" | wc -c | tr -d '[:space:]')" ||
+        fail "cannot validate custom key: $1"
+
+      if [ "$candidate_size" != "1" ]
+      then
+        fail "invalid custom key: $1"
+      fi
+
+      candidate_byte="$(LC_ALL=C printf '%s' "$1" | od -A n -t u1 | tr -d '[:space:]')" ||
+        fail "cannot validate custom key: $1"
+
+      case "$candidate_byte" in
+        ''|*[!0-9]*) fail "invalid custom key: $1" ;;
+      esac
+
+      if [ "$candidate_byte" -eq 32 ]
+      then
+        fail 'use key alias space instead of a literal space'
+      fi
+
+      if [ "$candidate_byte" -lt 33 ] || [ "$candidate_byte" -gt 126 ]
+      then
+        fail "invalid custom key: $1"
+      fi
+
+      mapped_key="$1"
       ;;
   esac
-
-  return 1
-}
-
-key_is_named_custom()
-{
-  case "$1" in
-    space|tab|enter|backspace|delete|insert|arrow_left|arrow_right|f1|f2|f3|f4|f5|f6|f7|f8|f9|f10|f11|f12|f13|f14|f15|f16|f17|f18|f19|f20)
-      return 0
-      ;;
-  esac
-
-  return 1
-}
-
-custom_key_is_configured()
-{
-  case "$newline$custom_keys$newline" in
-    *"$newline$1$newline"*)
-      return 0
-      ;;
-  esac
-
-  return 1
-}
-
-validate_custom_key()
-{
-  candidate="$1"
-
-  if key_is_reserved "$candidate"
-  then
-    fail "key is reserved: $candidate"
-  fi
-
-  if key_is_named_custom "$candidate"
-  then
-    return 0
-  fi
-
-  candidate_size="$(LC_ALL=C printf '%s' "$candidate" | wc -c | tr -d '[:space:]')"
-  if [ "$candidate_size" != "1" ]
-  then
-    fail "invalid custom key: $candidate"
-  fi
-
-  candidate_byte="$(LC_ALL=C printf '%s' "$candidate" | od -A n -t u1 | tr -d '[:space:]')"
-  case "$candidate_byte" in
-    ''|*[!0-9]*) fail "invalid custom key: $candidate" ;;
-  esac
-
-  if [ "$candidate_byte" -eq 32 ]
-  then
-    fail 'use key alias space instead of a literal space'
-  fi
-
-  if [ "$candidate_byte" -lt 33 ] || [ "$candidate_byte" -gt 126 ]
-  then
-    fail "invalid custom key: $candidate"
-  fi
 }
 
 add_custom_key()
 {
-  validate_custom_key "$1"
+  legacy_key_to_menu "$1"
 
-  if custom_key_is_configured "$1"
+  if map menu_ext_adv_key_aliases get "$mapped_key" menu_ext_adv_existing_alias >/dev/null 2>&1
   then
     fail "duplicate custom key: $1"
   fi
 
-  if [ -z "$custom_keys" ]
+  map menu_ext_adv_key_aliases put "$mapped_key" "$1" ||
+    fail "cannot store custom key: $1"
+
+  if [ "$mapped_key" != "enter" ]
   then
-    custom_keys="$1"
-  else
-    custom_keys="$custom_keys$newline$1"
+    menu_key_add "$mapped_key" || fail "$menu_error"
   fi
+
+  custom_key_count="$((custom_key_count + 1))"
 }
 
-update_geometry()
+menu_ext_adv_provider()
 {
-  term_lines="$(tput lines 2>/dev/null)" || fail 'cannot read terminal height'
-  term_cols="$(tput cols 2>/dev/null)" || fail 'cannot read terminal width'
+  case "$1" in
+    event)
+      [ "$#" -eq 5 ] || return 2
 
-  case "$term_lines" in
-    ''|*[!0-9]*) fail 'invalid terminal height' ;;
-  esac
-
-  case "$term_cols" in
-    ''|*[!0-9]*) fail 'invalid terminal width' ;;
-  esac
-
-  header_lines="$(line_count "$header")"
-  footer_lines="$(line_count "$footer")"
-  bottom_footer_lines="$(line_count "$bottom_footer")"
-  visible_rows="$((term_lines - header_lines - footer_lines - bottom_footer_lines))"
-
-  if [ "$visible_rows" -lt 1 ] || [ "$term_cols" -lt 3 ]
-  then
-    fail 'terminal is too small'
-  fi
-}
-
-render_menu()
-{
-  selected="$1"
-  top="$2"
-  shift 2
-
-  tput clear >&3 2>/dev/null || fail 'terminal does not support clear'
-
-  if [ -n "$header" ]
-  then
-    print_block "$header" "$term_cols" "1"
-  fi
-
-  remaining="$((item_count - top))"
-  if [ "$remaining" -lt "$visible_rows" ]
-  then
-    render_rows="$remaining"
-  else
-    render_rows="$visible_rows"
-  fi
-
-  index="0"
-  row="0"
-  last_menu_row="$((render_rows - 1))"
-  text_width="$((term_cols - 2))"
-
-  for item
-  do
-    if [ "$index" -ge "$top" ] && [ "$row" -lt "$render_rows" ]
-    then
-      split_item "$item"
-      text="$(printf '%s\n' "$item_text" | cut -c "1-$text_width")"
-
-      if [ "$index" -eq "$selected" ]
+      if map menu_ext_adv_key_aliases get "$2" menu_ext_adv_result_alias >/dev/null 2>&1
       then
-        tput rev >&3 2>/dev/null || :
-        printf '> %s' "$text" >&3
-        tput sgr0 >&3 2>/dev/null || :
+        menu_provider_action=return
       else
-        printf '  %s' "$text" >&3
+        menu_provider_action=ignore
       fi
 
-      if [ "$row" -lt "$last_menu_row" ] || [ -n "$footer" ]
-      then
-        printf '\n' >&3
-      fi
-
-      row="$((row + 1))"
-    fi
-
-    index="$((index + 1))"
-  done
-
-  if [ -n "$footer" ]
-  then
-    print_block "$footer" "$term_cols" "0"
-  fi
-
-  if [ -n "$bottom_footer" ]
-  then
-    bottom_footer_row="$((term_lines - bottom_footer_lines))"
-    tput cup "$bottom_footer_row" 0 >&3 2>/dev/null || fail 'terminal does not support cursor positioning'
-    print_block "$bottom_footer" "$term_cols" "0"
-  fi
-
-  tput cup 0 0 >&3 2>/dev/null || fail 'terminal does not support cursor positioning'
-}
-
-selected_value()
-{
-  wanted="$1"
-  shift
-  index="0"
-
-  for item
-  do
-    if [ "$index" -eq "$wanted" ]
-    then
-      split_item "$item"
-      selected_item_value="$item_value"
-      return 0
-    fi
-
-    index="$((index + 1))"
-  done
-
-  return 1
-}
-
-return_custom_selection()
-{
-  pressed_key="$1"
-  wanted="$2"
-  shift 2
-
-  selected_value "$wanted" "$@" || fail 'cannot resolve selection'
-  cleanup
-  printf '%s@:=%s\n' "$pressed_key" "$selected_item_value"
-  exit 0
-}
-
-apply_key()
-{
-  action=""
-
-  case "$key" in
-    esc)
-      action="cancel"
-      return 0
-      ;;
-    arrow_up)
-      if [ "$selected" -gt 0 ]
-      then
-        selected="$((selected - 1))"
-        action="move"
-      fi
-      return 0
-      ;;
-    arrow_down)
-      if [ "$selected" -lt "$((item_count - 1))" ]
-      then
-        selected="$((selected + 1))"
-        action="move"
-      fi
-      return 0
-      ;;
-    pageup)
-      page_step="$((visible_rows - 1))"
-      if [ "$page_step" -lt 1 ]
-      then
-        page_step="1"
-      fi
-      if [ "$selected" -gt 0 ]
-      then
-        selected="$((selected - page_step))"
-        if [ "$selected" -lt 0 ]
-        then
-          selected="0"
-        fi
-        action="move"
-      fi
-      return 0
-      ;;
-    pagedown)
-      page_step="$((visible_rows - 1))"
-      if [ "$page_step" -lt 1 ]
-      then
-        page_step="1"
-      fi
-      if [ "$selected" -lt "$((item_count - 1))" ]
-      then
-        selected="$((selected + page_step))"
-        if [ "$selected" -gt "$((item_count - 1))" ]
-        then
-          selected="$((item_count - 1))"
-        fi
-        action="move"
-      fi
-      return 0
-      ;;
-    home)
-      if [ "$selected" -ne 0 ]
-      then
-        selected="0"
-        action="move"
-      fi
-      return 0
-      ;;
-    end)
-      if [ "$selected" -ne "$((item_count - 1))" ]
-      then
-        selected="$((item_count - 1))"
-        action="move"
-      fi
       return 0
       ;;
   esac
 
-  if custom_key_is_configured "$key"
-  then
-    action="custom"
-  fi
+  menu_array_provider "$@"
 }
+
+menu_reset || fail 'cannot initialize menu engine'
+map menu_ext_adv_key_aliases || fail 'cannot initialize custom-key map'
 
 while getopts ':H:F:B:K:h' option
 do
@@ -639,21 +202,22 @@ do
   esac
 done
 
-if [ -z "$custom_keys" ]
+if [ "$custom_key_count" -eq 0 ]
 then
   fail 'at least one -K custom key is required'
 fi
 
 delimiter_index="$((OPTIND - 1))"
-index="1"
-delimiter_seen="0"
+index=1
+delimiter_seen=0
+
 for argument
 do
   if [ "$index" -eq "$delimiter_index" ]
   then
     if [ "$argument" = "--" ]
     then
-      delimiter_seen="1"
+      delimiter_seen=1
     fi
     break
   fi
@@ -663,7 +227,7 @@ done
 
 shift "$delimiter_index"
 
-if [ "${delimiter_seen:-0}" != "1" ]
+if [ "$delimiter_seen" -ne 1 ]
 then
   fail 'missing -- before menu items'
 fi
@@ -673,103 +237,51 @@ then
   fail 'at least one menu item is required'
 fi
 
+array menu_ext_adv_values || fail 'cannot initialize menu values'
+array menu_ext_adv_labels || fail 'cannot initialize menu labels'
+
 for item
 do
   split_item "$item"
+
   case "$item_text" in
     *"$newline"*) fail 'menu item text must be a single line' ;;
   esac
+
+  array menu_ext_adv_values add "$item_value" || fail 'cannot store menu value'
+  array menu_ext_adv_labels add "$item_text" || fail 'cannot store menu label'
 done
 
-if ! command -v tput >/dev/null 2>&1
-then
-  fail 'tput is required'
-fi
+menu_header="$header"
+menu_footer="$footer"
+menu_bottom_footer="$bottom_footer"
+menu_array_values=menu_ext_adv_values
+menu_array_labels=menu_ext_adv_labels
 
-if ! exec 3<>/dev/tty
-then
-  fail 'no controlling terminal is available'
-fi
+menu_run_provider menu_ext_adv_provider
+status="$?"
 
-saved_tty="$(stty -g <&3 2>/dev/null)" || fail 'cannot read terminal settings'
-tty_active="1"
-trap 'cleanup' 0
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 131' QUIT
-trap 'exit 143' TERM
-trap 'exit 148' TSTP
-
-stty -echo -icanon min 1 time 0 <&3 2>/dev/null || fail 'cannot configure terminal'
-
-if tput smcup >&3 2>/dev/null
-then
-  alt_screen="1"
-fi
-
-if tput civis >&3 2>/dev/null
-then
-  cursor_hidden="1"
-fi
-
-item_count="$#"
-selected="0"
-top="0"
-render_needed="1"
-
-while :
-do
-  if [ "$render_needed" = "1" ]
-  then
-    update_geometry
-
-    if [ "$selected" -lt "$top" ]
+case "$status" in
+  0)
+    if ! map menu_ext_adv_key_aliases get "$menu_result_key" result_key >/dev/null 2>&1
     then
-      top="$selected"
-    elif [ "$selected" -ge "$((top + visible_rows))" ]
-    then
-      top="$((selected - visible_rows + 1))"
+      fail 'menu engine returned an unconfigured key'
     fi
 
-    render_menu "$selected" "$top" "$@"
-    render_needed="0"
-  fi
-
-  if ! read_key
-  then
-    fail 'cannot read from terminal'
-  fi
-
-  apply_key
-
-  case "$action" in
-    custom)
-      return_custom_selection "$key" "$selected" "$@"
-      ;;
-    cancel)
-      cleanup
-      exit 1
-      ;;
-    move)
-      pending="0"
-      while [ "$pending" -lt 64 ] && read_key_nowait
-      do
-        apply_key
-
-        case "$action" in
-          custom)
-            return_custom_selection "$key" "$selected" "$@"
-            ;;
-          cancel)
-            cleanup
-            exit 1
-            ;;
-        esac
-
-        pending="$((pending + 1))"
-      done
-
-      render_needed="1"
-      ;;
-  esac
-done
+    printf '%s@:=%s\n' "$result_key" "$menu_result_value"
+    exit 0
+    ;;
+  1)
+    exit 1
+    ;;
+  2)
+    if [ -n "$menu_error" ]
+    then
+      fail "$menu_error"
+    fi
+    fail 'menu engine failed'
+    ;;
+  *)
+    exit "$status"
+    ;;
+esac
