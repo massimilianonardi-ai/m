@@ -1,0 +1,211 @@
+NAME
+    srv - manage the portable local lifecycle of a service
+
+SYNOPSIS
+    srv start <service>
+    srv stop [-f] <service>
+    srv host user install <service>
+    srv host user uninstall <service>
+    srv host user start <service>
+    srv host user stop <service>
+    srv host user restart <service>
+    srv host system install <service> <account>
+    srv host system uninstall <service>
+    srv host system start <service>
+    srv host system stop <service>
+    srv host system restart <service>
+
+DESCRIPTION
+    srv provides the portable local service lifecycle owned by the technical m
+    layer. The service process remains a foreground program from its own point of
+    view; srv performs the surrounding background lifecycle management.
+
+    For a provider-backed service, <service> is a facility identity. srv resolves
+    the configured system facility default to one installed concrete provider,
+    validates that concrete's materialized facility-service start realization, and
+    launches the exact package command belonging to that concrete through the active
+    m bootstrap. This preserves m command dispatch and normal package-launcher
+    semantics independently of the host nohup PATH. Consumer package bindings are
+    not consulted. The normal package launcher remains responsible for package HOME,
+    environment, and dependency preparation.
+
+    Starting a service requires a configured system facility default and a valid
+    installed service realization for the selected concrete provider. Command-name
+    conventions and PATH are not consulted as an alternate service-discovery path.
+
+COMMANDS
+    start <service>
+        Start the service if it is not already running under valid managed runtime
+        state. Standard output and standard error from the service are appended to
+        its managed service log.
+
+    stop [-f] <service>
+        Stop a managed running service with SIGTERM and wait a finite period for
+        clean termination. If no active managed service remains, stop succeeds
+        idempotently.
+
+    host user install <service>
+        Persist the service in the calling POSIX account's native user supervisor
+        without starting it in the current session. The service must currently
+        resolve through a valid system facility default/provider realization.
+        Host-account discovery follows the actual POSIX account rather than
+        caller-overridden HOME/XDG state roots.
+
+    host user uninstall <service>
+        Stop/unload the hosted service when necessary and remove its persistent
+        native registration.
+
+    host user start <service>
+        Start the installed native user-supervisor registration. Current facility
+        default intent is resolved for this launch.
+
+    host user stop <service>
+        Stop/unload the current hosted process while leaving the native registration
+        installed.
+
+    host user restart <service>
+        Restart the installed hosted service through the native supervisor, resolving
+        current facility default intent for the replacement process.
+
+    host system install <service> <account>
+        Administratively reconcile a persistent system-supervisor registration for
+        the service using an explicit pre-existing non-root POSIX account. The caller
+        must already execute with effective UID 0; srv never invokes sudo/doas or
+        creates/modifies the account. Install resolves and records the exact current
+        concrete provider, prepares its service-specific system package HOME and
+        enables boot persistence without starting the service.
+
+    host system uninstall <service>
+        Administratively stop/unload and remove native system registration. The
+        execution account and authoritative package/service state are preserved.
+
+    host system start <service>
+        Start the installed system registration only when the current system
+        facility default still resolves to the concrete provider reconciled by the
+        last install.
+
+    host system stop <service>
+        Stop/unload the current system-hosted process while leaving persistent
+        registration installed.
+
+    host system restart <service>
+        Restart/reload the installed system service only when provider selection
+        still matches the reconciled concrete registration.
+
+OPTIONS
+    -f
+        Apply only to stop. Bypass the normal caller-ownership check and explicitly
+        request stopping the managed service. This is a lifecycle override, not an
+        authentication or security boundary.
+
+STATE
+    srv resolves its user-scoped technical run and log roots through state-path:
+
+        state-path user sys srv run
+        state-path user sys srv log
+
+    Runtime metadata below those roots is private to srv. Provider-backed running
+    instances persist the selected concrete provider identity together with PID,
+    caller-owner and exact command identity. Later facility-default changes do not
+    retarget the running instance; stop operates on recorded runtime state and does
+    not resolve another provider.
+
+    Runtime records created by older revisions without provider metadata remain
+    readable for stop and stale-state cleanup. Current starts always persist the
+    selected concrete provider identity.
+
+HOST USER SUPERVISION
+    On Linux, srv resolves the calling account's UID and home from host account
+    data, connects to that account's systemd user manager through /run/user/<uid>,
+    and persists a user unit below the account home at .config/systemd/user. The
+    unit uses /bin/sh as the fixed
+    ExecStart executable and carries the exact m bootstrap, srv command, internal
+    foreground runner and service identity as separately serialized arguments.
+    At registration, srv obtains its own physical command pathname from $0
+    rather than depending on a command identity exported by the bootstrap. This
+    avoids systemd executable-path restrictions for relocatable m roots
+    containing spaces or metacharacters.
+
+    On macOS, srv resolves the calling account's UID and home from host account
+    data, uses that account's launchd gui/<uid> domain and persists a LaunchAgent
+    below the account home at Library/LaunchAgents. ProgramArguments is constructed
+    with
+    plutil so the exact argv values remain data rather than interpolated XML/shell
+    source.
+
+    The host supervisor manages the provider foreground process directly. It never
+    invokes portable srv start. The persistent registration does not freeze a
+    provider concrete: each host start/restart resolves the current system facility
+    default and provider service realization. User host integration does not enable
+    systemd linger or an automatic restart policy.
+
+HOST SYSTEM SUPERVISION
+    System-host operations require pre-existing effective UID 0 administrative
+    authority. The selected execution account must already exist and must be
+    non-root. srv does not create/remove accounts and does not invoke privilege
+    escalation itself.
+
+    System registration records the exact concrete provider prepared by install.
+    The system facility default remains authoritative selection intent: each hosted
+    launch re-resolves it and fails as stale registration if it no longer matches.
+    Re-run "srv host system install <service> <account>" to reconcile a changed
+    provider before a later start/restart.
+
+    The provider process runs through the ordinary package launcher with system
+    package State Instance equal to the service identity. Its package HOME is
+    therefore equivalent to:
+
+        state-path system pkg <provider-package> home <service>
+
+    The service account owns only that prepared mutable HOME. srv does not grant it
+    ownership or write access to m/product/package executable roots. Those roots must
+    already be readable/executable by the selected account under host permissions.
+
+    Linux installs a systemd system unit with Type=simple and User=<account>.
+    macOS installs a LaunchDaemon under /Library/LaunchDaemons with
+    UserName=<account>. Both supervise the foreground provider directly, preserve
+    exact m/srv argv as data, and do not add an automatic restart policy.
+
+READINESS
+    Successful start establishes that the launched process survived the initial
+    launch check. It does not establish application-specific readiness or health.
+
+ENVIRONMENT
+    Requires a nonempty m_ROOT inherited from an initialized m environment.
+    From an uninitialized host shell, invoke m srv [arguments].
+
+
+EXIT STATUS
+    0     The requested lifecycle operation completed successfully. This includes
+          idempotent stop cases where the service is not running.
+    1     A lifecycle operation failed, including unavailable or invalid provider
+          selection/service realization.
+    2     The invocation, host scope/action, or service name is invalid.
+
+EXAMPLES
+    Start a service named web:
+
+        srv start web
+
+    Stop it normally:
+
+        srv stop web
+
+    Explicitly stop it despite caller-ownership metadata:
+
+        srv stop -f web
+
+    Install and start it under the calling account's native host supervisor:
+
+        srv host user install web
+        srv host user start web
+
+    Reconcile and start it as a system service using a pre-existing non-root
+    account (the shell must already have administrative/root authority):
+
+        srv host system install web daemon
+        srv host system start web
+
+SEE ALSO
+    pkg
+    state-path

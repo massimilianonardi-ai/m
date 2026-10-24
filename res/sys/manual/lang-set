@@ -1,0 +1,34 @@
+NAME
+    lang-set - query or change the selected global language
+
+SYNOPSIS
+    lang-set
+    lang-set <locale>
+
+DESCRIPTION
+    With no operands, lang-set writes the locale selected by the sys language
+    selector and a newline.
+
+    With one locale operand, lang-set validates every materialized global
+    res/<owner>/lang tree before changing any selector. The requested locale
+    must exist in every participating tree and every existing current selector
+    must be a valid local relative symbolic link.
+
+    Non-sys selectors are updated first and the sys selector is updated last.
+    On an ordinary update error the command attempts rollback. Successful
+    selection writes no output.
+
+    Package-local language resources are not modified.
+
+ENVIRONMENT
+    Requires a nonempty m_ROOT inherited from an initialized m environment.
+    From an uninitialized host shell, invoke m lang-set [arguments].
+
+
+EXIT STATUS
+    0   Query or selection succeeded.
+    Non-zero status indicates invalid invocation, invalid selector/locale or an
+        operational update failure.
+
+SEE ALSO
+    lang

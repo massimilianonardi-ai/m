@@ -1,0 +1,53 @@
+NAME
+    tls-nss-sync - reconcile approved m system CAs into a Linux browser NSS database
+
+SYNOPSIS
+    tls-nss-sync <effective-browser-home>
+
+DESCRIPTION
+    Project the additional public CAs authorized by tls-ca into the NSS
+    Shared DB selected for the supplied browser HOME on Linux.
+
+    Existing HOME/.pki/nssdb takes precedence; otherwise use
+    HOME/.local/share/pki/nssdb (Chromium M146 onward). Browser profile
+    directories and unrelated NSS trust entries are not shared or modified.
+
+    An ownership manifest under HOME/.m/tls-nss-owned records only entries
+    managed by this command; a per-HOME Linux flock serializes simultaneous
+    projections. Fingerprint-derived nicknames prevent ambiguity. Entries
+    outside the ownership manifest cannot be silently taken over.
+    Database entry content and SSL CA trust are checked during reconciliation,
+    including on subsequent launches, and conflicting entries cause failure.
+
+    If neither approved CAs nor a prior ownership manifest exists, the command
+    succeeds without creating an NSS database or requiring NSS tools.
+
+    Removing a CA through tls-ca causes its managed NSS projection to be
+    removed at the next synchronization. Already running Chromium/Electron
+    processes may retain their previously loaded trust until restart.
+    The operating system's independently trusted CAs remain unaffected.
+
+    This is a Linux-specific projection. Non-Linux browser trust backends
+    are not silently represented as NSS. The ordinary browser launch requests
+    this operation through launcher_nss in pkg-launch.lib.sh.
+
+DEPENDENCIES
+    For nonempty projection work, certutil from NSS, OpenSSL and Linux flock
+    are required. The browser HOME must be a real writable directory.
+    Existing NSS DBs with unsupported/password-protected configurations may
+    require separate administrator handling; verification is never bypassed.
+
+ENVIRONMENT
+    Requires a nonempty m_ROOT inherited from an initialized m environment.
+    From an uninitialized host shell, invoke m tls-nss-sync [arguments].
+
+
+EXIT STATUS
+    0     The owned NSS projection is reconciled or no work is necessary.
+    2-28  Specific validation, dependency, locking, NSS or filesystem
+          failure, diagnosed on stderr with tls-nss-sync.<branch> identity.
+
+SEE ALSO
+    tls-ca
+    pkg-launch.lib.sh
+    state-path

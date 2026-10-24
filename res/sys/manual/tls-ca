@@ -1,0 +1,60 @@
+NAME
+    tls-ca - authorize and revoke extra system-scoped TLS certificate authorities
+
+SYNOPSIS
+    tls-ca add <certificate.pem>
+    tls-ca remove <sha256-fingerprint>
+    tls-ca list
+
+DESCRIPTION
+    Administratively manages additional public root CA certificates used by
+    explicitly integrated m TLS clients. The authority belongs to system
+    sys/tls/conf resolved through state-path. It does not alter the host trust
+    store, browser profiles, client certificates or upstream public CA roots.
+
+    add accepts exactly one PEM-encoded public CA certificate, validates CA
+    capability and the SHA-256 fingerprint, and publishes a fingerprint-named
+    certificate atomically. Duplicate approval of the same certificate is
+    idempotent. Private keys and multi-certificate bundles are rejected.
+
+    remove deletes the exact approved fingerprint. list prints fingerprints of
+    approved certificates, one per line. Removed trust can persist in running
+    browser processes until restart and can remain independently trusted via
+    the host or another application-specific truststore.
+
+    The selected system state must be protected by host ownership and
+    permissions. Giving an untrusted POSIX account write access to this
+    configuration grants that account administrative trust authority.
+    tls-ca does not use m user-state bindings as authorization principals.
+
+OPERANDS
+    certificate.pem
+        Readable PEM certificate containing one public CA certificate.
+
+    sha256-fingerprint
+        Exactly 64 lowercase hexadecimal characters, shown by add and list.
+
+DEPENDENCIES
+    OpenSSL is required for add. The filesystem account running the command
+    must be permitted to modify system sys/tls/conf/ca. Readers require
+    traversal/read permission to use the public certificates.
+
+ENVIRONMENT
+    Requires a nonempty m_ROOT inherited from an initialized m environment.
+    From an uninitialized host shell, invoke m tls-ca [arguments].
+
+
+EXIT STATUS
+    0    Operation completed, including idempotent add and empty list.
+    2    Invalid command syntax.
+    3-19 Distinct authorization-state, certificate, dependency or filesystem
+         failures, diagnosed on standard error with tls-ca.<branch> identity.
+
+EXAMPLES
+    tls-ca add /path/to/corporate-root.pem
+    tls-ca list
+    tls-ca remove <fingerprint-from-add>
+
+SEE ALSO
+    tls-nss-sync
+    state-path
