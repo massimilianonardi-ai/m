@@ -1,1 +1,0 @@
-export PULSAR_BIN_DIR="$PKG_DIR/${PACKAGE}/bin"

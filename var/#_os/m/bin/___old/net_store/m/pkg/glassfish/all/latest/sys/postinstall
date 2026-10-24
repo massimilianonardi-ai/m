@@ -1,8 +1,0 @@
-postinstall()
-(
-  [ ! -L "$CONF_DIR" ] && rm -Rf "$CONF_DIR"
-  lnk -cfr "$PKG_DIR/${PACKAGE}/bin/glassfish/config" "$CONF_DIR"
-  
-  [ ! -L "$HOME_DIR" ] && rm -Rf "$HOME_DIR"
-  lnk -cfr "$PKG_DIR/${PACKAGE}/bin/glassfish/domains" "$HOME_DIR"
-)

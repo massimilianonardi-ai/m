@@ -1,5 +1,0 @@
-keycloak=cmd/keycloak
-keycloak-start=cmd/keycloak-start
-keycloak-stop=cmd/keycloak-stop
-keycloak-domain-start=cmd/keycloak-domain-start
-keycloak-domain-stop=cmd/keycloak-domain-stop

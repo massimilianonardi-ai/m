@@ -1,8 +1,0 @@
-#!/bin/sh
-
-if [ "$SYS_OS_TYPE" = "windows" ]
-then
-  "$GEOSERVER_HOME/bin/shutdown.bat" 1>>"$GEOSERVER_DATA_DIR/logs/stdout.log" 2>&1 &
-else
-  "$GEOSERVER_HOME/bin/shutdown.sh" 1>>"$GEOSERVER_DATA_DIR/logs/stdout.log" 2>&1 &
-fi

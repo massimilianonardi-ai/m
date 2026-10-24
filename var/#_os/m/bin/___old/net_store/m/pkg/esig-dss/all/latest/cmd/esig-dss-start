@@ -1,5 +1,0 @@
-#!/bin/sh
-
-TOMCAT_BIN_DIR="$(cd "$(path -al "$0")/../../bin/apache-tomcat/bin"; pwd)"
-
-graal "$TOMCAT_BIN_DIR/startup.sh"

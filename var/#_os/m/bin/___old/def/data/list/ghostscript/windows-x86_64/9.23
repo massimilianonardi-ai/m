@@ -1,5 +1,0 @@
-PKG_TYPE=ext
-
-VERSION="9.23"
-COMMANDS="bin/bin/gswin64c.exe:gs bin/bin/gswin64.exe:ghostscript"
-APPS="bin/bin/gswin64.exe:pdf/GhostScript"

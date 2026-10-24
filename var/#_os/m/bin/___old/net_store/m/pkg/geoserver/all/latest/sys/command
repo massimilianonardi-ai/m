@@ -1,2 +1,0 @@
-geoserver-start=cmd/geoserver-start
-geoserver-stop=cmd/geoserver-stop

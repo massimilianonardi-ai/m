@@ -1,4 +1,0 @@
-export SDKMANAGER_OPTS="--add-modules java.se.ee"
-export ANDROID_SDK_ROOT="$PKG_DIR/${PACKAGE}/bin"
-export ANDROID_HOME="$PKG_DIR/${PACKAGE}/bin"
-export ANDROID_SDK_HOME="$USER_DATA_DIR"

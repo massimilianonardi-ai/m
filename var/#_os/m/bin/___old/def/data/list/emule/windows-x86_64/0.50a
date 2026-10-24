@@ -1,5 +1,0 @@
-PKG_TYPE=ext
-
-VERSION="0.50a"
-COMMANDS="bin/emule.exe:emule"
-APPS="bin/emule.exe:internet/eMule"

@@ -1,7 +1,0 @@
-{
-  "m/bpmn/": true,
-  "m/test/denied/": false,
-  "m/test/auth/": true,
-  "m/test/auth/sys/": false,
-  "m/test/pub/": true
-}

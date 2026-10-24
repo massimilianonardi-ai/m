@@ -1,9 +1,0 @@
-[Desktop Entry]
-Version=1.0
-Name=NetBeans
-Exec=netbeans %F
-Terminal=false
-Type=Application
-Icon=netbeans-netbeans-icon
-StartupNotify=true
-StartupWMClass=Apache NetBeans IDE 29

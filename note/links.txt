@@ -1,6 +1,0 @@
-
-https://sed.js.org/
-https://ato.pxeger.com/about
-https://regex101.com/
-https://www.grymoire.com/Unix/Sed.html
-https://github.com/dylanaraps/pure-sh-bible

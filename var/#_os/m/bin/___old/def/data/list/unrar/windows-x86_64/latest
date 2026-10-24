@@ -1,4 +1,0 @@
-PKG_TYPE=ext
-
-VERSION="5.50"
-COMMANDS="bin/UnRAR.exe:unrar"

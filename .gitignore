@@ -1,0 +1,10 @@
+.DS_Store
+/src/
+/pkg/
+/state/user/
+/state/system/profile/*/*/*/data/
+/state/system/profile/*/*/*/home/
+/state/system/profile/*/*/*/cache/
+/state/system/profile/*/*/*/log/
+/state/system/profile/*/*/*/run/
+/state/system/profile/*/*/*/tmp/

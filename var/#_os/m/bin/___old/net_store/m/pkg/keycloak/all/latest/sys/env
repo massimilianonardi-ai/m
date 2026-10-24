@@ -1,1 +1,0 @@
-export KEYCLOAK_HOME="$PKG_DIR/${PACKAGE}/bin"

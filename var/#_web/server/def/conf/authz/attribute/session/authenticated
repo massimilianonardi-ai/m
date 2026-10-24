@@ -1,7 +1,0 @@
-{
-  "m/authorization/role/role-group_01/": true,
-  "m/authorization/role/role-group_02/": false,
-  "___m/app/app": true,
-  "m/data/write/": true,
-  "m/test/pub/": true
-}

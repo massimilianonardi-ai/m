@@ -1,6 +1,0 @@
-PKG_TYPE=ext
-
-VERSION=""
-TEMPLATE="PortableApps"
-COMMANDS="bin/Start.exe:portableapps"
-APPS="bin/Start.exe:launch/PortableApps bin/PortableApps:launch/PortableAppsDirectory"

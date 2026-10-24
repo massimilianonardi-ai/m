@@ -1,5 +1,0 @@
-PKG_TYPE=ext
-
-VERSION="4.1.0"
-COMMANDS="bin/bin/krita.exe:krita"
-APPS="bin/bin/krita.exe:multimedia/Krita"

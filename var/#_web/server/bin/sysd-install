@@ -1,3 +1,0 @@
-#!/bin/sh
-
-sysd install m-web-server 'm-web-server start m-lib-java' 'm-web-server stop m-lib-java' "/tmp" "$LOG_DIR/*.log"

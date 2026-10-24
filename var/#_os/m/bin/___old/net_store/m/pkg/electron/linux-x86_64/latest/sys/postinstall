@@ -1,6 +1,0 @@
-postinstall()
-(
-  FILE="$INSTALL_DIR/bin/chrome-sandbox"
-  sudo chown "root:root" "$FILE"
-  sudo chmod 4755 "$FILE"
-)

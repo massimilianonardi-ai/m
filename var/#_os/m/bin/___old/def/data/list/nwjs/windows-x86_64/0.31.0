@@ -1,3 +1,0 @@
-PKG_TYPE=ext
-
-COMMANDS="bin/nw.exe:nw"

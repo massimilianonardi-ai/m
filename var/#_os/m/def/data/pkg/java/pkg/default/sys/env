@@ -1,4 +1,0 @@
-export JAVA_TOOL_OPTIONS="-Duser.home=$USER_HOME_DIR"
-export JAVA_HOME="$PKG_DIR/${PACKAGE}/bin"
-export JDK_HOME="$JAVA_HOME"
-[ -z "$CLASSPATH" ] && export CLASSPATH="."

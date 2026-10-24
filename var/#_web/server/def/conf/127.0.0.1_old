@@ -1,3 +1,0 @@
-conf/service-all.json conf/srv-service-map.json
-conf/service-all.json conf/server-reverse-proxy.json
-conf/logger-dev.json conf/data-dev.json conf/auth-dev.json conf/service-auth.json conf/server-authorization-dev.json

@@ -1,4 +1,0 @@
-LINK_EXTRACT="link"
-
-LINK="https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u422-b05/OpenJDK8U-jdk_x64_linux_hotspot_8u422b05.tar.gz"
-

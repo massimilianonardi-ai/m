@@ -1,9 +1,0 @@
-[Desktop Entry]
-Version=1.0
-Name=cmd
-Exec=cmd
-Terminal=true
-Type=Application
-Icon=cmd-cmd-icon
-StartupNotify=true
-StartupWMClass=cmd

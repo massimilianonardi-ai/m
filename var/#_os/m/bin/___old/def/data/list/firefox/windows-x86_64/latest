@@ -1,5 +1,0 @@
-PKG_TYPE=ext
-
-VERSION=""
-COMMANDS="bin/firefox.exe:firefox"
-APPS="bin/firefox.exe:internet/Firefox"

@@ -1,9 +1,0 @@
-[Desktop Entry]
-Version=1.0
-Name=Double Commander
-Exec=app doublecmd run %F
-Terminal=false
-Type=Application
-Icon=doublecmd-doublecmd-icon
-StartupNotify=true
-StartupWMClass=doublecmd

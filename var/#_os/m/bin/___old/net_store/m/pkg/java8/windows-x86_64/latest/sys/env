@@ -1,1 +1,0 @@
-export JAVA8_HOME="$(cygpath -w "$PKG_DIR/${PACKAGE}/bin")"

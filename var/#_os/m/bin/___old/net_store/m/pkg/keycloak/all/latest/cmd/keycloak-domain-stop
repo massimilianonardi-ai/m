@@ -1,9 +1,0 @@
-#!/bin/sh
-
-. m-sys.lib.sh
-work "keycloak"
-
-PID="$(cat "$HOME_DIR/keycloak-domain.pid")"
-#kill "$PID"
-pkill -P "$PID"
-rm -f "$HOME_DIR/keycloak-domain.pid"

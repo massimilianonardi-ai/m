@@ -1,6 +1,0 @@
-PKG_TYPE=ext
-
-VERSION="2015-01-13_r37356"
-TEMPLATE="MPlayer-WW"
-COMMANDS="bin/mplayer.exe:mplayer-ww"
-APPS="bin/mplayer.exe:multimedia/MPlayer-WW"

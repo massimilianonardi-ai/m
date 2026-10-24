@@ -1,5 +1,0 @@
-PKG_TYPE=ext
-
-TEMPLATE="QuickWayToFolders"
-COMMANDS="bin/QuickWayToFolders.exe:quickwaytofolders"
-APPS="bin/QuickWayToFolders.exe:launch/QuickWayToFolders"

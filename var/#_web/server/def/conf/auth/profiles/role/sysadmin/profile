@@ -1,6 +1,0 @@
-{
-  "m/test/denied/": true,
-  "m/test/auth/": true,
-  "m/test/sysadmin/": true,
-  "m/test/path_01/": true
-}

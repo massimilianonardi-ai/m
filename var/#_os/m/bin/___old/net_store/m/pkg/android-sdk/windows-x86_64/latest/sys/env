@@ -1,4 +1,0 @@
-export SDKMANAGER_OPTS="--add-modules java.se.ee"
-export ANDROID_SDK_ROOT="$(cygpath -w "$PKG_DIR/${PACKAGE}/bin")"
-export ANDROID_HOME="$(cygpath -w "$PKG_DIR/${PACKAGE}/bin")"
-export ANDROID_SDK_HOME="$(cygpath -w "$USER_DATA_DIR")"

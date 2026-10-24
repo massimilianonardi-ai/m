@@ -1,7 +1,0 @@
-/m/src/git/m/cpp/test_project_cmake+ide/build/CMakeFiles/CMakeTestProject.dir
-/m/src/git/m/cpp/test_project_cmake+ide/build/CMakeFiles/edit_cache.dir
-/m/src/git/m/cpp/test_project_cmake+ide/build/CMakeFiles/rebuild_cache.dir
-/m/src/git/m/cpp/test_project_cmake+ide/build/CMakeFiles/list_install_components.dir
-/m/src/git/m/cpp/test_project_cmake+ide/build/CMakeFiles/install.dir
-/m/src/git/m/cpp/test_project_cmake+ide/build/CMakeFiles/install/local.dir
-/m/src/git/m/cpp/test_project_cmake+ide/build/CMakeFiles/install/strip.dir

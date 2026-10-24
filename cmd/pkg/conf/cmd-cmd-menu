@@ -1,7 +1,0 @@
-?package(cmd-cmd-menu): \
-	icon="/usr/share/pixmaps/cmd-cmd-icon.png" \
-	title="CMD" \
-	longtitle="CMD" \
-	needs="x11" \
-	section="Apps" \
-	command="cmd"

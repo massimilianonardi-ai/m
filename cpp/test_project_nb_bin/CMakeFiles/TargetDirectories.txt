@@ -1,3 +1,0 @@
-/m/src/git/m/cpp/test_project_nb_bin/CMakeFiles/example.dir
-/m/src/git/m/cpp/test_project_nb_bin/CMakeFiles/edit_cache.dir
-/m/src/git/m/cpp/test_project_nb_bin/CMakeFiles/rebuild_cache.dir

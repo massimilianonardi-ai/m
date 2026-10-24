@@ -1,9 +1,0 @@
-[Desktop Entry]
-Version=1.0
-Name=Pulsar
-Exec=pulsar %F
-Terminal=false
-Type=Application
-Icon=pulsar-pulsar-icon
-StartupNotify=true
-StartupWMClass=pulsar

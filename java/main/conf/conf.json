@@ -1,9 +1,0 @@
-[
-  {
-    "json-reflected-object": true,
-    "class": "java.lang.String",
-    "constructor.types": ["java.lang.String"],
-    "constructor.args": ["-test-string-"],
-    "assign.name": "testStringObject"
-  }
-]

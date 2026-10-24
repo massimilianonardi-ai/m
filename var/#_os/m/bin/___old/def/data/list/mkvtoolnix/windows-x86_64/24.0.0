@@ -1,5 +1,0 @@
-PKG_TYPE=ext
-
-VERSION="24.0.0"
-PATHS="bin"
-APPS="bin/mkvtoolnix-gui.exe:multimedia/MKVToolNix"

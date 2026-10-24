@@ -1,8 +1,0 @@
-postinstall()
-(
-  echo esig-dss postinstall - $INSTALL_DIR - $PACKAGE
-  mv "$INSTALL_DIR"/bin/apache-tomcat-* "$INSTALL_DIR/bin/apache-tomcat"
-  chmod +x "$INSTALL_DIR/bin/apache-tomcat/bin"/*
-  mv "$INSTALL_DIR/bin/apache-tomcat/conf/server.xml" "$INSTALL_DIR/bin/apache-tomcat/conf/server.xml.bak"
-  sed -e 's/8080/8001/g' "$INSTALL_DIR/bin/apache-tomcat/conf/server.xml.bak" > "$INSTALL_DIR/bin/apache-tomcat/conf/server.xml"
-)

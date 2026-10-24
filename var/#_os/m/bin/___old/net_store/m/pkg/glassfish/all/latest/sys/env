@@ -1,1 +1,0 @@
-export GLASSFISH_HOME="$PKG_DIR/${PACKAGE}/bin"

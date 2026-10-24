@@ -1,9 +1,0 @@
-#include "service.h"
-
-//SERVICE_DISPATCHER_DEFINITION(Service)
-//{
-//  return SERVICE_NULL;
-//}
-
-//SERVICE_DISPATCHER(Service)
-//SERVICE_DISPATCHER_END

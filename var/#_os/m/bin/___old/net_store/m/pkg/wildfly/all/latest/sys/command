@@ -1,5 +1,0 @@
-wildfly=cmd/wildfly
-wildfly-start=cmd/wildfly-start
-wildfly-stop=cmd/wildfly-stop
-wildfly-domain-start=cmd/wildfly-domain-start
-wildfly-domain-stop=cmd/wildfly-domain-stop

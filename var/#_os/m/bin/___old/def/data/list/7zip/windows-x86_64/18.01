@@ -1,7 +1,0 @@
-PKG_TYPE=ext
-
-#COMMANDS="bin/7z.exe:7zip bin/7zFM.exe:7zfm"
-#APPS="bin/7zFM.exe:archive/7zFileManager"
-TEMPLATE="7zip"
-COMMANDS="bin/7z.exe:7zip bin/7-ZipPortable.exe:7zfm"
-APPS="bin/7-ZipPortable.exe:archive/7zFileManager"

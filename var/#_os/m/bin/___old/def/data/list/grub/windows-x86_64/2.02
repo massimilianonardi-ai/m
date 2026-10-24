@@ -1,4 +1,0 @@
-PKG_TYPE=ext
-
-VERSION="2.02"
-PATHS="bin"

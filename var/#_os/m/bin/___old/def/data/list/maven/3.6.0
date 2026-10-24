@@ -1,3 +1,0 @@
-PKG_TYPE=ext
-
-COMMANDS="bin/bin/mvn:mvn"
