@@ -1,0 +1,67 @@
+name: m core checkout smoke
+
+on:
+  push:
+    branches:
+      - master
+      - m-core-integration
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checkout-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check standalone bootstrap and core commands without host Node
+        shell: sh
+        run: |
+          set -eu
+          root=$(pwd -P)
+          [ -x ./m ]
+          [ ! -e bin/sys/mk ]
+          [ ! -e lib/sys/js/mk.lib.js ]
+
+          shadow="${RUNNER_TEMP:-/tmp}/m-no-node"
+          mkdir -p "$shadow"
+          printf '#!/bin/sh\nexit 97\n' > "$shadow/node"
+          chmod 755 "$shadow/node"
+          PATH="$shadow:$PATH"
+          export PATH
+
+          ./m sh -c '[ -n "$m_ROOT" ] && [ -n "$m_LIB_DIR" ] && [ -n "$m_PKG_DIR" ]'
+          ./m osarch update
+          ./m osarch show
+          ./m state-path system sys pkg conf
+          [ "$(./m lang-set)" = en_US ]
+          ./m manual --no-pager pkg > /dev/null
+          ./m manual --no-pager core.lib.sh > /dev/null
+          ./m manual --no-pager pkg-versions.lib.sh > /dev/null
+          ./m pkg versions nodejs >/dev/null 2>&1 && {
+            printf '%s\n' 'Unexpected installed package in clean checkout' >&2
+            exit 1
+          } || :
+          ./m tls-ca list > /dev/null
+
+          # No package catalog or Node.js is needed to perform these actions.
+          [ ! -d "$root/pkg/nodejs@v26.8.2" ]
+          find lib/sys/sh -type f -name '*.lib.sh' -exec sh -n {} \;
+          for cmd in bin/sys/*
+          do
+            [ -f "$cmd" ] || continue
+            [ -x "$cmd" ] || continue
+            [ -f "res/sys/manual/${cmd##*/}" ]
+          done
+          find lib/sys/sh -type f -name '*.lib.sh' -print |
+          while IFS= read -r library
+          do
+            [ -f "res/sys/manual/${library##*/}" ] || exit 1
+          done
