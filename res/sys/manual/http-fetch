@@ -1,0 +1,49 @@
+NAME
+    http-fetch - fetch HTTP or HTTPS content through an available host backend
+
+SYNOPSIS
+    http-fetch [-H <header>]... [-l] [-o <file>] [-t <seconds>] -- <url>
+
+DESCRIPTION
+    http-fetch performs one HTTP or HTTPS request. It prefers curl and falls
+    back to GNU Wget when necessary.
+
+    By default the response body is written to standard output. Redirects are
+    followed and redirected protocols remain restricted to HTTP and HTTPS.
+
+    With -o, when standard error is connected to a terminal, http-fetch leaves
+    the selected backend's native transfer progress visible on standard error.
+    Progress is suppressed when standard error is not a terminal, when the
+    response body is written to standard output, and for -l requests. Progress
+    formatting is backend-specific.
+
+    On a backend transfer failure, backend-native diagnostics remain visible and
+    http-fetch adds structured execution context identifying the selected backend
+    and its native status. That context is diagnostic only: the public http-fetch
+    status remains 1 for transfer failures.
+
+OPTIONS
+    -H <header>
+        Add one HTTP request header. May be repeated. The value must contain a
+        colon and must not contain CR or LF.
+    -l
+        Request headers and write exactly one valid Content-Length value from
+        the final response. Cannot be combined with -o.
+    -o <file>
+        Write the response body to the specified file.
+    -t <seconds>
+        Set the positive integer transfer/connectivity timeout. Default: 30.
+
+OPERANDS
+    <url>
+        One http:// or https:// URL after the mandatory -- delimiter.
+
+ENVIRONMENT
+    Requires a nonempty m_ROOT inherited from an initialized m environment.
+    From an uninitialized host shell, invoke m http-fetch [arguments].
+
+
+EXIT STATUS
+    0   Success.
+    1   Transfer, backend or response-validation failure.
+    2   Invalid invocation.

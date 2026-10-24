@@ -1,0 +1,91 @@
+NAME
+    manual - discover and present RumiAI operational manual topics
+
+SYNOPSIS
+    manual
+    manual [--no-pager] <topic>
+    manual [--no-pager] <owner> <topic>
+
+DESCRIPTION
+    manual accesses revision-coupled operational documentation distributed with
+    the current RumiAI OS product revision.
+
+    With no operands, manual discovers all materialized global manual topics and
+    writes one owner-qualified identity per line:
+
+        <owner> <topic>
+
+    Discovery output is sorted lexically by owner and then topic. Topic identities
+    are always owner-qualified in discovery output, even when a topic name is
+    globally unique.
+
+    With one topic operand, manual first searches all materialized global owners
+    for an exact topic-name match. One exact match is presented; multiple exact
+    matches fail as ambiguous while listing the owner-qualified invocations that
+    resolve the ambiguity.
+
+    If no exact topic exists, manual searches topic names for the operand as a
+    literal substring, equivalent to *<topic>*. When one or more substring matches
+    exist, manual writes their owner-qualified identities to standard output,
+    sorted lexically by owner and then topic. This result list is discovery output
+    and is not sent through the pager. If the substring search is also empty, the
+    request fails as not found.
+
+    With owner and topic operands, manual resolves only that exact owner-local
+    topic and does not perform substring fallback or fall back to another owner.
+
+OPTIONS
+    --no-pager
+        Write an exactly selected topic directly to standard output instead of
+        invoking the normal pager. This option is valid only when a topic is
+        requested. Substring-search result lists are always written directly.
+
+PRESENTATION
+    When --no-pager is absent and an exact topic is selected, manual delegates
+    presentation to the technical pager command. pager owns terminal detection
+    and host-specific viewer selection.
+
+    --no-pager bypasses pager and writes an exactly selected topic directly to
+    standard output. Discovery and substring-search result lists never invoke
+    pager.
+
+FILES
+    res/<owner>/manual/<topic>
+        Owner-qualified global operational manual topic.
+
+ENVIRONMENT
+    Requires a nonempty m_ROOT inherited from an initialized m environment.
+    From an uninitialized host shell, invoke m manual [arguments].
+
+
+EXIT STATUS
+    0   Success, including a non-empty substring-search result list.
+    1   Invalid invocation or invalid owner/topic identifier.
+    2   Requested topic not found and no substring matches found.
+    3   Exact unqualified topic is ambiguous.
+    4   Execution or presentation failure, including pager failure.
+
+EXAMPLES
+    Discover all available topics:
+
+        manual
+
+    Present a globally unique exact topic:
+
+        manual state-path
+
+    Search topic names when no exact topic exists:
+
+        manual state
+
+    Resolve an ambiguous exact topic explicitly:
+
+        manual ai pkg
+        manual sys pkg
+
+    Write a selected topic directly without paging:
+
+        manual --no-pager sys pkg
+
+SEE ALSO
+    pager

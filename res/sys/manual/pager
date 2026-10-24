@@ -1,0 +1,54 @@
+NAME
+    pager - select less when available, otherwise more
+
+SYNOPSIS
+    pager [file ...]
+
+DESCRIPTION
+    pager is a thin terminal-pager wrapper.
+
+    It selects less when less is available through the current command
+    environment. Otherwise it selects more.
+
+    With no file operands, the selected backend reads standard input.
+
+    With one or more file operands, pager passes the operands unchanged and in
+    their original order to the selected backend.
+
+    pager does not inspect terminal state, resolve or validate file paths,
+    pre-read or concatenate input, rewrite backend diagnostics, or normalize
+    backend exit statuses. Interactive and redirected behavior therefore follow
+    the selected backend.
+
+BACKEND POLICY
+    less
+        Preferred whenever available.
+
+    more
+        Fallback when less is unavailable.
+
+    Selection is based on command availability, not operating-system identity.
+
+CALLER ENVIRONMENT
+    pager preserves the caller environment.
+
+    Variables consumed by the selected backend, including LESS, LESSOPEN and
+    LESSCLOSE, are not cleared or rewritten.
+
+    pager does not expose separate backend configuration or arbitrary backend
+    command strings.
+
+OPERANDS
+    file
+        File operand passed unchanged to the selected backend. Zero or more file
+        operands are accepted.
+
+EXIT STATUS
+    The exit status is the status of the selected backend, or the shell
+    execution-failure status if that backend cannot be executed. pager does not
+    define a normalized backend-independent status mapping.
+
+SEE ALSO
+    manual
+    less
+    more

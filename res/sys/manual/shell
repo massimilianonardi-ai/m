@@ -1,0 +1,29 @@
+NAME
+    shell - start the managed interactive shell environment
+
+SYNOPSIS
+    shell [<shell-argument> ...]
+
+DESCRIPTION
+    shell starts the program named by SHELL, integrating it with m-managed shell
+    configuration and state.
+
+    bash is started with the managed bash rcfile.
+    zsh receives managed startup files through a user-state ZDOTDIR.
+    sh, dash and ash receive the managed ENV file.
+    Other shells are executed without a shell-specific configuration adapter.
+
+    Arguments are forwarded to the selected shell.
+
+ENVIRONMENT
+    Requires a nonempty m_ROOT inherited from an initialized m environment.
+    From an uninitialized host shell, invoke m shell [arguments].
+
+    SHELL
+        Shell executable to start. Defaults to sh when unset or empty.
+    m_SHELL_EXT
+        Exported shell-extension value used by managed shell configuration.
+
+EXIT STATUS
+    On success shell replaces itself with the selected shell.
+    Non-zero status indicates state/configuration preparation or exec failure.

@@ -1,0 +1,34 @@
+NAME
+    lang - resolve one technical localized message
+
+SYNOPSIS
+    lang <domain> <message-id>
+
+DESCRIPTION
+    lang resolves text from the technical sys language catalog.
+
+    Lookup order is:
+        selected sys locale
+        en_US fallback locale
+        literal <domain>.<message-id> fallback
+
+    Catalog content is treated as UTF-8 data and is not evaluated as shell code.
+    The command does not merge or resolve branded ai catalogs.
+
+OPERANDS
+    <domain>
+        Technical message domain.
+    <message-id>
+        Message identifier within the domain.
+
+ENVIRONMENT
+    Requires a nonempty m_ROOT inherited from an initialized m environment.
+    From an uninitialized host shell, invoke m lang [arguments].
+
+
+EXIT STATUS
+    0   Message resolution/output completed.
+    Non-zero status indicates invalid invocation or output/runtime failure.
+
+SEE ALSO
+    lang-set

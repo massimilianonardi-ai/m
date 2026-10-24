@@ -1,0 +1,249 @@
+NAME
+    pkg - manage packages in the m package subsystem
+
+SYNOPSIS
+    pkg install <package-spec>...
+    pkg uninstall <package-spec>...
+    pkg versions <package-class>
+    pkg depend <package-spec>...
+    pkg default [-u] [--] <package-spec>
+    pkg provider default <facility> [<provider-selector>]
+    pkg provider default -u [--] <facility>
+    pkg provider bind <consumer> <facility> [<provider-selector>]
+    pkg provider bind -u [--] <consumer> <facility>
+    pkg requirement list <package-spec>
+    pkg requirement resolve <facility> <constraint>...
+
+DESCRIPTION
+    pkg is the public package command of the technical m layer. Package catalog
+    data is obtained from the current pkg-catalog source; installed package content
+    is managed beneath $m_PKG_DIR.
+
+    Package operations use the real package pipeline for catalog/repository
+    resolution, artifact integrity, download, extraction, integration, defaults,
+    and launch/state integration as applicable.
+
+PACKAGE OPERANDS
+    Package operands use the current forms:
+
+        <package>
+        <package>@<version>
+        <package>!<osarch>
+        <package>@<version>!<osarch>
+
+    A version or osarch suffix is optional where the selected subcommand permits
+    it. When installation omits a version, pkg resolves the applicable version from
+    the current catalog for the requested package/platform class.
+
+    Provider selectors use the same four package-spec shapes. An omitted version
+    expresses a provider-package selection that follows that package's current
+    default when resolved; an explicit version expresses a pinned provider version.
+
+COMMANDS
+    install <package-spec>...
+        Validate the complete request list before dependency planning. If any
+        package specification is syntactically invalid, fail before catalog
+        resolution or package installation. Otherwise discover recursive
+        dependencies with pkg depend, prepend the returned exact dependency
+        concretes to the original request list, and install the resulting sequence
+        dependency-first.
+
+        The original requested package specifications remain requests and are
+        resolved by the installer when reached. Dependency operands are already
+        concrete. An already installed concrete is not reinstalled.
+
+    uninstall <package-spec>...
+        Remove one or more installed package versions. When a version is omitted,
+        the current/default version is selected when available; a single installed
+        version may also be resolved directly.
+
+    versions <package-class>
+        List installed concrete package identities for one package/platform class.
+        A version suffix is not accepted for this query.
+
+    depend <package-spec>...
+        Discover and resolve only the recursive facility dependencies of the
+        requested packages without installing anything. Requested root packages are
+        not printed unless the same concrete is also selected as a dependency of
+        another request.
+
+        Dependency output is one exact concrete identity per line in
+        dependency-first order. Consumer binding has precedence over the system
+        facility default. Without either selector, an already planned compatible
+        provider is preferred, followed by an unambiguous compatible installed
+        provider. Only when no compatible planned or installed provider exists may
+        the planner add a catalog provider; multiple compatible provider packages
+        are ambiguous and fail rather than being ranked silently. Such an
+        ambiguity reports reason=provider-ambiguous together with the affected
+        facility, combined constraints, target osarch and exact compatible provider
+        candidates so the operator can configure an explicit provider selection.
+
+        The command is read-only with respect to package/provider state. Catalog
+        cache refresh and invocation-private temporary snapshot materialization are
+        allowed.
+
+    default <package-spec>
+        With an explicit version, select that installed version as the current
+        default for the package/platform class. Without a version, print the
+        current concrete default identity.
+
+    default -u [--] <package-class>
+        Clear the current default binding for the package/platform class. A version
+        suffix is not accepted when -u is used.
+
+    provider default <facility>
+        Print the configured system default provider selector for the facility.
+
+    provider default <facility> <provider-selector>
+        Set the system default provider selector for the facility. Commands declared
+        by that facility are reconciled into bin/ext or bin/ext-<osarch> according
+        to provider-selector and package-default semantics. Every later m bootstrap
+        also re-resolves the facility default and applies the selected provider's
+        facility-env projection when that provider is resolvable for the active
+        platform class. Already-running processes are unchanged.
+
+    provider default -u [--] <facility>
+        Remove the configured system default provider selector and its owned global
+        facility command projection.
+
+    provider bind <consumer> <facility>
+        Print the configured provider selector bound to the consumer/facility pair.
+
+    provider bind <consumer> <facility> <provider-selector>
+        Set the provider selector bound to the consumer/facility pair.
+
+    provider bind -u [--] <consumer> <facility>
+        Remove the consumer binding. A package consumer then uses the system facility
+        default when configured; if neither binding nor default exists, runtime
+        resolution may use an unambiguous compatible installed provider.
+
+    requirement list <package-spec>
+        Resolve the selected package/version/platform definition from the current
+        catalog and print its declared dependency lines without downloading or
+        extracting the package artifact. An empty successful result means that the
+        selected package definition declares no facility dependencies.
+
+    requirement resolve <facility> <constraint>...
+        Resolve the configured system facility default using the normal global
+        package-class/osarch semantics and verify that the selected installed
+        concrete declares <facility> at a compatibility satisfying every supplied
+        constraint.
+
+        On success, print the selected concrete provider identity. The query is
+        read-only: it does not install providers, choose among installed providers
+        implicitly, change a facility default or create a consumer binding. A
+        status-1 failure identifies whether the facility default is unconfigured,
+        unresolvable or resolves to an incompatible provider.
+
+        Compatibility constraints use the package dependency language, for example:
+
+            =25
+            >=21
+            >=21 <26
+
+NATIVE-COMMAND MIGRATION
+    Installed package concretes contain copies of launcher and package env
+    definitions from the catalog revision used during installation. After
+    migrating m from #!/usr/bin/env m to native command entrypoints, older
+    installed concretes remain incompatible until they are reinstalled.
+
+    Coordinate a maintenance window for the affected packages and services;
+    do not publish the new m dispatcher independently of the compatible
+    catalog. Before any removal, inventory every exact installed concrete
+    with pkg versions <package-class>, record defaults with pkg default
+    <package-class>, and preserve provider bindings and system service
+    registrations. Verify that each exact version can be restored from the
+    selected new catalog, including artifact availability/integrity, and
+    prepare restorable backups of both the installation and package state
+    (user, system and any service state instances). Inspect unmanaged mutable
+    data inside the package root as well.
+
+    Stop affected consumers/services. For each recorded exact concrete use:
+
+        m pkg uninstall <package>@<version>[!<osarch>]
+        m pkg install   <package>@<version>[!<osarch>]
+
+    After all required versions of a class are installed, restore only a
+    previously recorded current/default selection:
+
+        m pkg default <package>@<selected-version>[!<osarch>]
+
+    Leave previously unselected classes without a default. Confirm native
+    cmd/env content, command execution, managed configuration and service
+    state before restarting consumers. Respect provider references: the
+    manager can refuse removal of a still-referenced provider. Handle
+    consumer/provider dependency order accordingly and do not force-delete
+    directories or edit immutable installed concretions.
+
+    Each uninstall/install is a separate operation; the complete migration
+    is not transactional. If artifact acquisition, provider compatibility or
+    reinstall fails, stop and reconcile explicitly using the recorded state
+    and verified compatible backup. Do not replace an unavailable exact
+    version with latest and do not assume pkg depend proves artifact access.
+
+STATE
+    Mutable package state is resolved through state-path rather than reconstructed
+    by callers. Package HOME and configuration used at launch are user-scoped state.
+
+    m-managed package configuration normally uses the reserved .m subnamespace
+    inside the package conf area. Provider bindings are the explicit exception:
+    a system-scoped consumer binding is stored as binding/<facility> in that
+    package's system conf area and contains exactly one provider selector.
+
+FILES
+    $m_PKG_DIR
+        Managed package store root. pkg install does not create this directory for
+        an invocation whose request list contains a syntactically invalid operand.
+
+ENVIRONMENT
+    Requires a nonempty m_ROOT inherited from an initialized m environment.
+    From an uninitialized host shell, invoke m pkg [arguments].
+
+
+EXIT STATUS
+    0   The requested operation succeeded.
+    1   The requested package operation could not be completed after a valid
+        invocation, or the requested installed class/default could not be resolved
+        where required.
+    2   The command or subcommand invocation is invalid. For pkg install, this
+        includes any syntactically invalid package specification in the original
+        request list; no dependency planning or installation is attempted.
+
+    Individual package execution launched after integration has its own exit status;
+    that is not the exit status of this pkg management command.
+
+EXAMPLES
+    Install the catalog-selected version of a package:
+
+        pkg install nodejs
+
+    List installed versions for the current platform class:
+
+        pkg versions nodejs
+
+    Query the current default concrete identity:
+
+        pkg default nodejs
+
+    Clear the default binding:
+
+        pkg default -u nodejs
+
+    Select Temurin as the system provider for the java facility:
+
+        pkg provider default java temurin
+
+    Pin Maven to a specific Temurin version:
+
+        pkg provider bind maven java temurin@25.0.4.1+1
+
+    Inspect the requirements declared by the catalog-selected Keycloak package:
+
+        pkg requirement list keycloak
+
+    Verify that the current system java provider satisfies a global/build requirement:
+
+        pkg requirement resolve java '>=21' '<26'
+
+SEE ALSO
+    state-path

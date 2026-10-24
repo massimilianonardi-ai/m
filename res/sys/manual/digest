@@ -1,0 +1,37 @@
+NAME
+    digest - calculate a normalized cryptographic or MD5 digest
+
+SYNOPSIS
+    digest -a <algorithm>
+    digest -a <algorithm> -- <file>
+
+DESCRIPTION
+    digest calculates one digest from standard input or from one readable
+    regular file and writes the lowercase hexadecimal digest followed by a
+    newline.
+
+    Supported algorithms are sha256, sha512 and md5.
+
+    When no file operand is supplied, input is read from standard input.
+    A file operand requires the -- delimiter.
+
+    digest selects an available host backend for the requested algorithm and
+    validates the returned digest before writing it.
+
+OPTIONS
+    -a <algorithm>
+        Select sha256, sha512 or md5.
+
+OPERANDS
+    <file>
+        Read digest input from this readable regular file.
+
+ENVIRONMENT
+    Requires a nonempty m_ROOT inherited from an initialized m environment.
+    From an uninitialized host shell, invoke m digest [arguments].
+
+
+EXIT STATUS
+    0   Success.
+    2   Invalid invocation or unsupported algorithm.
+    Other non-zero status indicates input, backend or digest-validation failure.

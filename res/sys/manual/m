@@ -1,0 +1,103 @@
+NAME
+    m - initialize the technical runtime and dispatch native commands
+
+SYNOPSIS
+    m
+    m <command> [argument ...]
+
+DESCRIPTION
+    m resolves the technical runtime root, initializes the relocatable m
+    runtime environment, establishes the current state/resource roots, directly
+    loads core.lib.sh, sources any materialized global execution environment,
+    exposes the final technical command path, and then performs command dispatch
+    or managed-shell entry.
+
+    With no command operand, m starts the managed shell through the shell
+    facility.
+
+    With a command operand, m attempts to resolve and canonicalize the first
+    operand to reject recursive execution of the bootstrap. It then executes
+    the original argument vector externally via its native interpreter, with
+    exported initialized m environment and PATH. m does not interpret command
+    shebangs, source command bodies, or export a per-command identity.
+
+    Environment-dependent commands use their native shebangs, require nonempty
+    m_ROOT, and load any shell libraries they need inside their own process.
+    To invoke one from an uninitialized shell, use m <command>. A command
+    already inheriting initialized m environment can be invoked directly.
+
+    The bootstrap refuses to dispatch itself recursively as a command.
+
+GLOBAL EXECUTION ENVIRONMENT
+    Before command dispatch, m reads generated environment state from:
+
+        state/system/current/sys/environment/cache
+
+    relative to m_ROOT.
+
+    When present, m sources the regular file:
+
+        env
+
+    and then the platform selector:
+
+        env-osarch -> env-<osarch>
+
+    m tests each expected pathname with -f and sources it when that test
+    succeeds. It does not validate or regenerate env-osarch selector structure
+    during bootstrap.
+
+    These files are derived state. m does not resolve package providers,
+    facility defaults or package defaults while bootstrapping.
+
+    Provider PATH contributions are applied to the inherited host PATH by the
+    generated files. m then prepends its technical sys/ext command roots, so the
+    final technical precedence is:
+
+        m technical command roots
+        selected-osarch provider PATH
+        osarch-independent provider PATH
+        inherited host PATH
+
+CORE-PROVIDED RUNTIME FUNCTIONS
+    Once a shell process loads core.lib.sh, that shell provides the following
+    functions. They are not inherited by independently executed commands:
+    each shell command needing them loads core.lib.sh itself.
+
+    loadlib <library-reference>
+        Load exactly one m-owned POSIX-shell library reference relative to
+        m_LIB_DIR. The reference omits the final .lib.sh suffix.
+
+        The resolved file must be a readable regular file and is sourced in the
+        current shell environment.
+
+        Return status:
+            loaded library status
+                returned unchanged after a successful load
+            1   invalid invocation; exactly one reference is required
+            2   resolved library file is missing, not regular, or unreadable
+
+    loadsyslib <system-shell-library-reference>
+        Load exactly one m system shell library below lib/sys/sh by delegating
+        to loadlib with the sys/sh/ prefix.
+
+        Examples:
+
+            loadsyslib "array"
+            loadsyslib "pkg/pkg-install"
+            loadsyslib "rsudo/rsudo-mod-fs"
+
+        Positional-parameter forwarding is not part of the loading interface.
+        m- and RumiAI-owned shell code uses loadsyslib for owned lib/sys/sh
+        dependencies; runtime/external pathname sourcing remains ordinary
+        POSIX dot-sourcing.
+
+        Return status:
+            delegated loadlib/library status
+
+EXIT STATUS
+    With a dispatched command, m returns that command's status.
+    Bootstrap, root-resolution or command-resolution failures return non-zero.
+
+SEE ALSO
+    shell

@@ -1,0 +1,69 @@
+NAME
+    extract - extract or materialize one physical artifact format
+
+SYNOPSIS
+    extract <format> <artifact> <destination>
+
+DESCRIPTION
+    extract performs raw physical artifact extraction or materialization. It does
+    not interpret package catalog metadata, select package components, choose a
+    package useful root or apply package overlays.
+
+    <format> identifies the physical artifact format, <artifact> is the input
+    file and <destination> is an existing real directory receiving the raw
+    result.
+
+    Supported archive/container formats are:
+        tar
+        tar.gz  tgz
+        tar.bz2 tar.bzip2 tbz tbz2
+        tar.xz  txz
+        tar.zst tzst
+        zip jar war
+        7z 7zip
+        dmg
+        deb
+        pkg
+
+    Supported single-stream compression formats are:
+        gzip gz
+        bzip bzip2 bz2
+        xz
+        zstd zst
+
+    appimage and executable are opaque physical materialization formats.
+    appimage copies the artifact unchanged into the destination. executable does
+    the same and ensures the copied output is executable.
+
+    dmg extracts the DMG contents only. It does not interpret .app, .pkg or any
+    other object found inside the image.
+
+    pkg expands one Apple flat installer package into its raw expanded package
+    structure. It does not select a component or Payload and never runs installer
+    scripts.
+
+    A single-stream format creates one decompressed file in the destination,
+    deriving its name from the artifact basename and compression suffix. The
+    output pathname must not already exist.
+
+    Backend utilities are selected according to the requested format and host
+    capabilities. Missing required backends cause failure.
+
+OPERANDS
+    <format>
+        Explicit physical artifact format.
+    <artifact>
+        Existing readable regular file.
+    <destination>
+        Existing real directory receiving raw materialized content.
+
+ENVIRONMENT
+    Requires a nonempty m_ROOT inherited from an initialized m environment.
+    From an uninitialized host shell, invoke m extract [arguments].
+
+
+EXIT STATUS
+    0   Success.
+    2   Invalid invocation or unsupported format.
+    Other non-zero status indicates artifact, destination, backend or extraction
+        failure.

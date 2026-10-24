@@ -1,0 +1,31 @@
+NAME
+    log - emit one localized structured runtime log record
+
+SYNOPSIS
+    log <severity> <domain> <message-id> [<field> <value>]...
+
+DESCRIPTION
+    log emits a structured record to standard error when the requested severity
+    is enabled by m_LOG_LEVEL.
+
+    Supported severities are:
+        fatal error warn info debug trace
+
+    Message text is resolved through the technical lang facility. Additional
+    fields are supplied as name/value pairs and are appended to the record.
+
+    m_LOG_LEVEL accepts the current filtering levels off/none, fatal, error,
+    warn, info, debug and trace/all.
+
+ENVIRONMENT
+    Requires a nonempty m_ROOT inherited from an initialized m environment.
+    From an uninitialized host shell, invoke m log [arguments].
+
+
+EXIT STATUS
+    0   The invocation was valid, whether the record was emitted or filtered.
+    Non-zero status indicates invalid severity, log level, identifiers or field
+        arguments.
+
+SEE ALSO
+    lang

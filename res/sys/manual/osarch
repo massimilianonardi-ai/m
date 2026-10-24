@@ -1,0 +1,99 @@
+NAME
+    osarch - query, inspect and select active OS/architecture command roots
+
+SYNOPSIS
+    osarch
+    osarch show
+    osarch update
+    osarch set <osarch>
+
+DESCRIPTION
+    osarch owns the active platform selection represented by:
+        bin/sys-osarch
+        bin/ext-osarch
+        bin/ai-osarch
+        state/system/current/sys/environment/cache/env-osarch
+
+    All four selectors must be relative symbolic links and must represent the
+    same supported normalized osarch. The first three target platform command
+    directories. env-osarch targets the generated regular environment snapshot
+    env-<osarch>.
+
+    With no arguments, osarch writes only the currently selected osarch followed
+    by a newline.
+
+    osarch show writes the selected osarch, its normalized operating-system and
+    architecture components, and one block for each selector containing:
+        link
+            selector pathname
+        target
+            relative symbolic-link target
+        resolved
+            physical pathname reached by resolving the selector
+
+    osarch update detects the host operating system and architecture through the
+    m OS/architecture facility and selects the resulting normalized osarch.
+
+    osarch set <osarch> selects the explicit supported normalized identity.
+
+    The normalized identity has the form:
+        <platform>-<architecture>
+
+    Current platforms are linux, macos and windows. Current architectures are
+    x86_64 and arm64.
+
+    update and set ensure these directories exist:
+        bin/sys-<osarch>
+        bin/ext-<osarch>
+        bin/ai-<osarch>
+        state/system/current/sys/environment/cache
+
+    They also ensure the selected environment target exists as a regular file
+    and create or update these relative selector symlinks:
+        bin/sys-osarch -> sys-<osarch>
+        bin/ext-osarch -> ext-<osarch>
+        bin/ai-osarch  -> ai-<osarch>
+        .../environment/cache/env-osarch -> env-<osarch>
+
+    Selector updates are treated as one transition. If one selector update
+    fails, osarch attempts to restore the previous selector targets.
+
+    Existing non-symlink objects at selector paths are not overwritten.
+
+
+OUTPUT
+    Bare osarch writes:
+        <osarch>
+
+    osarch show uses this form:
+        osarch: <osarch>
+        os: <platform>
+        arch: <architecture>
+        sys-osarch:
+          link: <pathname>
+          target: sys-<osarch>
+          resolved: <physical-pathname>
+        ext-osarch:
+          link: <pathname>
+          target: ext-<osarch>
+          resolved: <physical-pathname>
+        ai-osarch:
+          link: <pathname>
+          target: ai-<osarch>
+          resolved: <physical-pathname>
+        env-osarch:
+          link: <pathname>
+          target: env-<osarch>
+          resolved: <physical-pathname>
+
+    Successful update and set operations produce no output.
+
+ENVIRONMENT
+    Requires a nonempty m_ROOT inherited from an initialized m environment.
+    From an uninitialized host shell, invoke m osarch [arguments].
+
+
+EXIT STATUS
+    0   Query, display or selection completed successfully.
+    Non-zero status indicates invalid arguments, an invalid/misaligned selector,
+        unsupported detected platform data or filesystem/update failure.
