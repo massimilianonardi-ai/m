@@ -51,8 +51,18 @@ jobs:
           } || :
           ./m tls-ca list > /dev/null
 
+          # Exercise the real public install flow, with no host Node prerequisite.
+          ./m pkg install nodejs@v26.8.2
+          installed=$(./m pkg default nodejs)
+          case "$installed" in
+            nodejs@v26.8.2!*) : ;;
+            *) printf 'Unexpected managed Node concrete: %s\\n' "$installed" >&2; exit 1 ;;
+          esac
+          [ -d "pkg/$installed/root" ]
+          ./m node --version
+
           # No package catalog or Node.js is needed to perform these actions.
-          [ ! -d "$root/pkg/nodejs@v26.8.2" ]
+          [ -d "$root/pkg/$installed" ]
           find lib/sys/sh -type f -name '*.lib.sh' -exec sh -n {} \;
           for cmd in bin/sys/*
           do
