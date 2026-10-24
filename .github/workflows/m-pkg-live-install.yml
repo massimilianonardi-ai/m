@@ -1,0 +1,32 @@
+name: m live package installation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install managed Node.js via real pkg and selected pkg-catalog
+        shell: sh
+        run: |
+          set -eu
+          ./m osarch update
+          ./m pkg install nodejs@v26.8.2
+          concrete=$(./m pkg default nodejs)
+          case "$concrete" in
+            nodejs@v26.8.2!*) : ;;
+            *) printf 'Unexpected installed concrete: %s\n' "$concrete" >&2; exit 1 ;;
+          esac
+          [ -d "pkg/$concrete/root" ]
+          ./m node --version
