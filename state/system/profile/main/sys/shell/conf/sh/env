@@ -1,0 +1,17 @@
+if [ -n "${m_SHELL_ENV-}" ] && [ -r "$m_SHELL_ENV" ]
+then
+  . "$m_SHELL_ENV"
+fi
+
+unset m_SHELL_ENV
+
+\unalias -a
+
+. "$m_LIB_DIR/sys/sh/core.lib.sh"
+
+PS1="${m_SHELL_NAME} $(uname -n):\${PWD}\$ "
+
+if [ -f "$m_SHELL_EXT" ] && [ -r "$m_SHELL_EXT" ]
+then
+  . "$m_SHELL_EXT"
+fi
