@@ -1,0 +1,270 @@
+#!/bin/sh
+
+[ -n "${m_ROOT:-}" ] || { printf '%s\n' 'http-fetch: m environment not initialized' >&2; exit 1; }
+
+. "$m_LIB_DIR/sys/sh/core.lib.sh" || { printf '%s\n' 'http-fetch: m shell runtime unavailable' >&2; exit 2; }
+
+http_fetch_timeout=30
+http_fetch_output=
+http_fetch_headers=
+http_fetch_length="0"
+http_fetch_progress=0
+http_fetch_lf='
+'
+http_fetch_cr="$(printf '\r')"
+http_fetch_seen_delimiter=0
+
+http_fetch_content_length()
+{
+  LC_ALL=C command -p -- awk '
+function reset_response() {
+  content_length_count=0
+  content_length=""
+  content_length_invalid=0
+}
+{
+  line=$0
+  sub(/\r$/, "", line)
+  sub(/^[[:space:]]+/, "", line)
+
+  if (line ~ /^HTTP\/[0-9.]+[[:space:]]+[0-9][0-9][0-9]([[:space:]]|$)/) {
+    response_seen=1
+    reset_response()
+    next
+  }
+
+  if (!response_seen) next
+
+  lower=tolower(line)
+  if (lower ~ /^content-length:[[:space:]]*/) {
+    value=line
+    sub(/^[^:]*:[[:space:]]*/, "", value)
+    sub(/[[:space:]]+$/, "", value)
+    if (value !~ /^(0|[1-9][0-9]*)$/) {
+      content_length_invalid=1
+      next
+    }
+    content_length_count++
+    content_length=value
+  }
+}
+END {
+  if (!response_seen || content_length_invalid || content_length_count != 1) exit 1
+  print content_length
+}
+'
+}
+
+while [ "$#" -gt 0 ]
+do
+  case "$1" in
+    -H)
+      [ "$#" -ge 2 ] || fatal 2 execution invalid-arguments operation http-fetch
+      http_fetch_header=$2
+      [ -n "$http_fetch_header" ] || fatal 2 execution invalid-arguments operation http-fetch
+      case "$http_fetch_header" in
+        *:*) :;;
+        *) fatal 2 execution invalid-arguments operation http-fetch;;
+      esac
+      case "$http_fetch_header" in
+        *"$http_fetch_lf"*|*"$http_fetch_cr"*) fatal 2 execution invalid-arguments operation http-fetch;;
+      esac
+      if [ -n "$http_fetch_headers" ]
+      then
+        http_fetch_headers="$http_fetch_headers$http_fetch_lf$http_fetch_header"
+      else
+        http_fetch_headers=$http_fetch_header
+      fi
+      shift 2
+      ;;
+    -l)
+      http_fetch_length="1"
+      shift
+      ;;
+    -o)
+      [ "$#" -ge 2 ] || fatal 2 execution invalid-arguments operation http-fetch
+      [ -n "$2" ] || fatal 2 execution invalid-arguments operation http-fetch
+      http_fetch_output=$2
+      shift 2
+      ;;
+    -t)
+      [ "$#" -ge 2 ] || fatal 2 execution invalid-arguments operation http-fetch
+      case "$2" in
+        ''|0|*[!0-9]*) fatal 2 execution invalid-arguments operation http-fetch;;
+      esac
+      http_fetch_timeout=$2
+      shift 2
+      ;;
+    --)
+      http_fetch_seen_delimiter=1
+      shift
+      break
+      ;;
+    *) fatal 2 execution invalid-arguments operation http-fetch;;
+  esac
+done
+
+[ "$http_fetch_seen_delimiter" -eq 1 ] || fatal 2 execution invalid-arguments operation http-fetch
+[ "$#" -eq 1 ] || fatal 2 execution invalid-arguments operation http-fetch
+[ "$http_fetch_length" -eq "0" ] || [ -z "$http_fetch_output" ] || fatal 2 execution invalid-arguments operation http-fetch
+http_fetch_url=$1
+
+case "$http_fetch_url" in
+  http://*|https://*) :;;
+  *) fatal 2 execution invalid-arguments operation http-fetch;;
+esac
+
+if [ -n "$http_fetch_output" ] && [ -t 2 ]
+then
+  http_fetch_progress=1
+fi
+
+if command -- curl --version >/dev/null 2>&1
+then
+  set -- \
+    -q \
+    --fail \
+    --location
+
+  if [ "$http_fetch_progress" -eq "0" ]
+  then
+    set -- "$@" --silent
+  fi
+
+  set -- "$@" \
+    --show-error \
+    --connect-timeout "$http_fetch_timeout" \
+    --speed-limit 1 \
+    --speed-time "$http_fetch_timeout" \
+    --proto '=http,https' \
+    --proto-redir '=http,https'
+
+  if [ "$http_fetch_length" -eq "1" ]
+  then
+    set -- "$@" --head
+  elif [ -n "$http_fetch_output" ]
+  then
+    set -- "$@" --output "$http_fetch_output"
+  fi
+
+  if [ -n "$http_fetch_headers" ]
+  then
+    http_fetch_old_ifs=$IFS
+    IFS=$http_fetch_lf
+    set -f
+    for http_fetch_header in $http_fetch_headers
+    do
+      set -- "$@" --header "$http_fetch_header"
+    done
+    set +f
+    IFS=$http_fetch_old_ifs
+  fi
+
+  set -- "$@" -- "$http_fetch_url"
+
+  if [ "$http_fetch_length" -eq "1" ]
+  then
+    http_fetch_response="$(command -- curl "$@" 2>&1)"
+    http_fetch_status="$?"
+    if [ "$http_fetch_status" -ne "0" ]
+    then
+      [ -z "$http_fetch_response" ] || printf -- '%s\n' "$http_fetch_response" >&2
+      log error execution execution-failed \
+        operation http-fetch \
+        reason transfer-failed \
+        backend curl \
+        status "$http_fetch_status" || :
+      exit "1"
+    fi
+    printf -- '%s\n' "$http_fetch_response" | http_fetch_content_length
+    [ "$?" -eq "0" ] && exit "0"
+    exit "1"
+  fi
+
+  command -- curl "$@"
+  http_fetch_status=$?
+  [ "$http_fetch_status" -eq "0" ] && exit "0"
+  log error execution execution-failed \
+    operation http-fetch \
+    reason transfer-failed \
+    backend curl \
+    status "$http_fetch_status" || :
+  exit "1"
+fi
+
+http_fetch_wget_version="$(LC_ALL=C command -- wget --version 2>/dev/null)" || http_fetch_wget_version=
+if [ -n "$http_fetch_wget_version" ]
+then
+  case "$http_fetch_wget_version" in
+    'GNU Wget '*|*"$http_fetch_lf"'GNU Wget '*)
+      set -- \
+        --no-config
+
+      if [ "$http_fetch_progress" -eq "0" ]
+      then
+        set -- "$@" --no-verbose
+      fi
+
+      set -- "$@" \
+        --tries=1 \
+        --timeout="$http_fetch_timeout" \
+        --max-redirect=20
+
+      if [ "$http_fetch_length" -eq "1" ]
+      then
+        set -- "$@" --spider --server-response
+      elif [ -n "$http_fetch_output" ]
+      then
+        set -- "$@" --output-document="$http_fetch_output"
+      else
+        set -- "$@" --output-document=-
+      fi
+
+      if [ -n "$http_fetch_headers" ]
+      then
+        http_fetch_old_ifs=$IFS
+        IFS=$http_fetch_lf
+        set -f
+        for http_fetch_header in $http_fetch_headers
+        do
+          set -- "$@" --header="$http_fetch_header"
+        done
+        set +f
+        IFS=$http_fetch_old_ifs
+      fi
+
+      set -- "$@" -- "$http_fetch_url"
+
+      if [ "$http_fetch_length" -eq "1" ]
+      then
+        http_fetch_response="$(command -- wget "$@" 2>&1)"
+        http_fetch_status="$?"
+        if [ "$http_fetch_status" -ne "0" ]
+        then
+          [ -z "$http_fetch_response" ] || printf -- '%s\n' "$http_fetch_response" >&2
+          log error execution execution-failed \
+            operation http-fetch \
+            reason transfer-failed \
+            backend wget \
+            status "$http_fetch_status" || :
+          exit "1"
+        fi
+        printf -- '%s\n' "$http_fetch_response" | http_fetch_content_length
+        [ "$?" -eq "0" ] && exit "0"
+        exit "1"
+      fi
+
+      command -- wget "$@"
+      http_fetch_status=$?
+      [ "$http_fetch_status" -eq "0" ] && exit "0"
+      log error execution execution-failed \
+        operation http-fetch \
+        reason transfer-failed \
+        backend wget \
+        status "$http_fetch_status" || :
+      exit "1"
+      ;;
+  esac
+fi
+
+fatal execution execution-failed operation http-fetch reason backend-unavailable

@@ -1,0 +1,21 @@
+#!/bin/sh
+
+[ -n "${m_ROOT:-}" ] || { printf '%s\n' 'pkg: m environment not initialized' >&2; exit 1; }
+
+. "$m_LIB_DIR/sys/sh/core.lib.sh" || { printf '%s\n' 'pkg: m shell runtime unavailable' >&2; exit 2; }
+
+loadsyslib "osarch"
+
+[ "$#" -ge 1 ] || fatal execution invalid-arguments operation pkg
+
+pkg_command=$1
+shift
+
+case "$pkg_command" in
+  install|uninstall|versions|depend|default|provider|requirement) :;;
+  *) fatal 2 execution invalid-arguments operation pkg subcommand "$pkg_command";;
+esac
+
+loadsyslib "pkg/pkg-${pkg_command}"
+
+"pkg_${pkg_command}" "$@"

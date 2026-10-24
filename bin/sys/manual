@@ -1,0 +1,192 @@
+#!/bin/sh
+
+[ -n "${m_ROOT:-}" ] || { printf '%s\n' 'manual: m environment not initialized' >&2; exit 1; }
+
+. "$m_LIB_DIR/sys/sh/core.lib.sh" || { printf '%s\n' 'manual: m shell runtime unavailable' >&2; exit 2; }
+
+manual_name_valid()
+{
+  [ "$#" -eq 1 ] || return 2
+  case "$1" in
+    "" | [!abcdefghijklmnopqrstuvwxyz0123456789]* | *[!abcdefghijklmnopqrstuvwxyz0123456789._-]* | *[._-]) return 1 ;;
+  esac
+}
+
+manual_discover()
+{
+  [ -d "$m_RES_DIR" ] && [ ! -L "$m_RES_DIR" ] || return 1
+
+  {
+    for manual_owner_dir in "$m_RES_DIR"/*
+    do
+      [ -d "$manual_owner_dir" ] && [ ! -L "$manual_owner_dir" ] || continue
+      manual_owner=${manual_owner_dir##*/}
+      manual_name_valid "$manual_owner" || continue
+
+      manual_dir="$manual_owner_dir/manual"
+      [ -d "$manual_dir" ] && [ ! -L "$manual_dir" ] || continue
+
+      for manual_topic_path in "$manual_dir"/*
+      do
+        [ -f "$manual_topic_path" ] && [ ! -L "$manual_topic_path" ] || continue
+        manual_topic=${manual_topic_path##*/}
+        manual_name_valid "$manual_topic" || continue
+        printf -- '%s %s\n' "$manual_owner" "$manual_topic" || return 1
+      done
+    done
+  } | LC_ALL=C command -p -- sort
+}
+
+manual_search()
+{
+  [ "$#" -eq 1 ] || return 1
+  manual_search_topic=$1
+
+  [ -d "$m_RES_DIR" ] && [ ! -L "$m_RES_DIR" ] || return 1
+
+  {
+    for manual_owner_dir in "$m_RES_DIR"/*
+    do
+      [ -d "$manual_owner_dir" ] && [ ! -L "$manual_owner_dir" ] || continue
+      manual_owner=${manual_owner_dir##*/}
+      manual_name_valid "$manual_owner" || continue
+
+      manual_dir="$manual_owner_dir/manual"
+      [ -d "$manual_dir" ] && [ ! -L "$manual_dir" ] || continue
+
+      for manual_topic_path in "$manual_dir"/*
+      do
+        [ -f "$manual_topic_path" ] && [ ! -L "$manual_topic_path" ] || continue
+        manual_candidate_topic=${manual_topic_path##*/}
+        manual_name_valid "$manual_candidate_topic" || continue
+
+        case "$manual_candidate_topic" in
+          *"$manual_search_topic"*)
+            printf -- '%s %s\n' "$manual_owner" "$manual_candidate_topic" || return 1
+            ;;
+        esac
+      done
+    done
+  } | LC_ALL=C command -p -- sort
+}
+
+manual_ambiguity_print()
+{
+  [ "$#" -eq 1 ] || return 1
+  manual_ambiguity_topic=$1
+
+  {
+    for manual_owner_dir in "$m_RES_DIR"/*
+    do
+      [ -d "$manual_owner_dir" ] && [ ! -L "$manual_owner_dir" ] || continue
+      manual_owner=${manual_owner_dir##*/}
+      manual_name_valid "$manual_owner" || continue
+
+      manual_dir="$manual_owner_dir/manual"
+      [ -d "$manual_dir" ] && [ ! -L "$manual_dir" ] || continue
+
+      manual_candidate="$manual_dir/$manual_ambiguity_topic"
+      [ -f "$manual_candidate" ] && [ ! -L "$manual_candidate" ] || continue
+      printf -- '%s\n' "$manual_owner" || return 1
+    done
+  } | LC_ALL=C command -p -- sort | while IFS= read -r manual_owner
+  do
+    printf -- 'manual %s %s\n' "$manual_owner" "$manual_ambiguity_topic" >&2 || exit 1
+  done
+}
+
+manual_no_pager=0
+
+if [ "$#" -eq 0 ]
+then
+  manual_discover || fatal 4 execution execution-failed operation manual reason discovery-failed
+  exit 0
+fi
+
+if [ "$1" = "--no-pager" ]
+then
+  manual_no_pager=1
+  shift
+fi
+
+[ "$#" -eq 1 ] || [ "$#" -eq 2 ] || fatal 1 execution invalid-arguments operation manual
+
+if [ "$#" -eq 1 ]
+then
+  manual_topic=$1
+  manual_name_valid "$manual_topic" || fatal 1 execution invalid-arguments operation manual
+
+  [ -d "$m_RES_DIR" ] && [ ! -L "$m_RES_DIR" ] || \
+    fatal 4 execution execution-failed operation manual reason resource-root-unavailable
+
+  manual_match_count=0
+  manual_topic_path=
+
+  for manual_owner_dir in "$m_RES_DIR"/*
+  do
+    [ -d "$manual_owner_dir" ] && [ ! -L "$manual_owner_dir" ] || continue
+    manual_owner=${manual_owner_dir##*/}
+    manual_name_valid "$manual_owner" || continue
+
+    manual_dir="$manual_owner_dir/manual"
+    [ -d "$manual_dir" ] && [ ! -L "$manual_dir" ] || continue
+
+    manual_candidate="$manual_dir/$manual_topic"
+    [ -f "$manual_candidate" ] && [ ! -L "$manual_candidate" ] || continue
+
+    manual_match_count=$((manual_match_count + 1))
+    manual_topic_path=$manual_candidate
+  done
+
+  case "$manual_match_count" in
+    0)
+      manual_search_output="$(manual_search "$manual_topic")" || \
+        fatal 4 execution execution-failed operation manual reason search-failed topic "$manual_topic"
+
+      if [ -n "$manual_search_output" ]
+      then
+        printf -- '%s\n' "$manual_search_output" || \
+          fatal 4 execution execution-failed operation manual reason search-output-failed topic "$manual_topic"
+        exit 0
+      fi
+
+      fatal 2 execution execution-failed operation manual reason topic-not-found topic "$manual_topic"
+      ;;
+    1)
+      :
+      ;;
+    *)
+      log error execution execution-failed operation manual reason topic-ambiguous topic "$manual_topic" || :
+      manual_ambiguity_print "$manual_topic" || \
+        fatal 4 execution execution-failed operation manual reason ambiguity-output-failed topic "$manual_topic"
+      exit 3
+      ;;
+  esac
+else
+  manual_owner=$1
+  manual_topic=$2
+
+  manual_name_valid "$manual_owner" || fatal 1 execution invalid-arguments operation manual
+  manual_name_valid "$manual_topic" || fatal 1 execution invalid-arguments operation manual
+
+  [ -d "$m_RES_DIR" ] && [ ! -L "$m_RES_DIR" ] || \
+    fatal 4 execution execution-failed operation manual reason resource-root-unavailable
+
+  manual_owner_dir="$m_RES_DIR/$manual_owner"
+  manual_dir="$manual_owner_dir/manual"
+  manual_topic_path="$manual_dir/$manual_topic"
+
+  [ -d "$manual_owner_dir" ] && [ ! -L "$manual_owner_dir" ] && \
+  [ -d "$manual_dir" ] && [ ! -L "$manual_dir" ] && \
+  [ -f "$manual_topic_path" ] && [ ! -L "$manual_topic_path" ] || \
+    fatal 2 execution execution-failed operation manual reason topic-not-found owner "$manual_owner" topic "$manual_topic"
+fi
+
+if [ "$manual_no_pager" -eq 1 ]
+then
+  command -p -- cat "$manual_topic_path" || \
+    fatal 4 execution execution-failed operation manual reason output-failed topic "$manual_topic"
+else
+  command -- pager "$manual_topic_path" || \
+    fatal 4 execution execution-failed operation manual reason pager-failed pager pager topic "$manual_topic"
+fi

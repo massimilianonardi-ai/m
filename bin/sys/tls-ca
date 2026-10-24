@@ -1,0 +1,139 @@
+#!/bin/sh
+
+[ -n "${m_ROOT:-}" ] || { printf '%s\n' 'tls-ca: m environment not initialized' >&2; exit 1; }
+
+# System-scoped public CA authority. The OS filesystem owner of the selected
+# system conf grants administrative write access; consumers are read-only.
+tls_ca_die()
+{
+  printf 'tls-ca.%s: %s\n' "$1" "$2" >&2
+  exit "$3"
+}
+
+tls_ca_fingerprint()
+{
+  openssl x509 -in "$1" -outform DER 2>/dev/null |
+    openssl dgst -sha256 -r 2>/dev/null |
+    awk '{ print $1 }'
+}
+
+tls_ca_validate()
+{
+  [ -f "$1" ] && [ ! -L "$1" ] && [ -r "$1" ] || return 1
+  [ "$(grep -c -- '-----BEGIN CERTIFICATE-----' "$1")" -eq 1 ] || return 1
+  [ "$(grep -c -- '-----END CERTIFICATE-----' "$1")" -eq 1 ] || return 1
+  if grep -Eq -- '-----BEGIN .*PRIVATE KEY-----' "$1"
+  then
+    return 1
+  fi
+  openssl x509 -in "$1" -noout -ext basicConstraints 2>/dev/null |
+    grep -q 'CA:TRUE' || return 1
+  tls_ca_key_usage=$(openssl x509 -in "$1" -noout -ext keyUsage 2>/dev/null) || return 1
+  case "$tls_ca_key_usage" in
+    *"No extensions in certificate"* | *"No extensions in certificate"*) : ;;
+    *"Certificate Sign"*) : ;;
+    *) return 1 ;;
+  esac
+  tls_ca_fingerprint "$1" | grep -Eq '^[0-9a-f]{64}$'
+}
+
+tls_ca_main()
+{
+  [ "$#" -ge 1 ] || tls_ca_die invalid-arguments 'expected add, remove or list' 2
+  tls_ca_action=$1
+  shift
+  case "$tls_ca_action" in
+    add) [ "$#" -eq 1 ] || tls_ca_die invalid-arguments 'add requires a PEM file' 2 ;;
+    remove) [ "$#" -eq 1 ] || tls_ca_die invalid-arguments 'remove requires a fingerprint' 2 ;;
+    list) [ "$#" -eq 0 ] || tls_ca_die invalid-arguments 'list takes no operand' 2 ;;
+    *) tls_ca_die invalid-arguments 'unknown operation' 2 ;;
+  esac
+
+  tls_ca_conf=$( "$m_ROOT/m" "$m_BIN_DIR/sys/state-path" system sys tls conf ) ||
+    tls_ca_die state-resolution-failed 'unable to resolve system TLS configuration' 3
+  tls_ca_dir="$tls_ca_conf/ca"
+  [ -L "$m_STATE_SYS_DIR" ] && [ -d "$m_STATE_SYS_DIR" ] ||
+    tls_ca_die system-selector-invalid 'selected system state profile is unavailable' 19
+
+  [ ! -L "$tls_ca_conf" ] && [ ! -L "$tls_ca_dir" ] ||
+    tls_ca_die state-symlink-rejected 'system TLS configuration contains a symbolic link' 4
+
+  if [ "$tls_ca_action" = list ]
+  then
+    [ -d "$tls_ca_dir" ] || {
+      [ ! -e "$tls_ca_dir" ] || tls_ca_die state-invalid 'CA directory is not a directory' 5
+      return 0
+    }
+    for tls_ca_file in "$tls_ca_dir"/*.pem
+    do
+      [ -e "$tls_ca_file" ] || [ -L "$tls_ca_file" ] || continue
+      [ -f "$tls_ca_file" ] && [ ! -L "$tls_ca_file" ] ||
+        tls_ca_die state-invalid 'invalid CA directory entry' 5
+      tls_ca_name=$(basename -- "$tls_ca_file" .pem)
+      printf '%s\n' "$tls_ca_name"
+    done
+    return 0
+  fi
+
+  if [ "$tls_ca_action" = remove ]
+  then
+    case "$1" in
+      *[!0123456789abcdef]* | "") tls_ca_die invalid-fingerprint 'expected a lowercase SHA-256 fingerprint' 6 ;;
+    esac
+    [ "${#1}" -eq 64 ] ||
+      tls_ca_die invalid-fingerprint 'expected a 64-character SHA-256 fingerprint' 6
+    [ -d "$tls_ca_dir" ] && [ ! -L "$tls_ca_dir" ] ||
+      tls_ca_die state-invalid 'CA directory is missing or unsafe' 5
+    tls_ca_target="$tls_ca_dir/$1.pem"
+    [ -f "$tls_ca_target" ] && [ ! -L "$tls_ca_target" ] ||
+      tls_ca_die certificate-not-found 'fingerprint is not authorized' 7
+    command -p -- rm -- "$tls_ca_target" ||
+      tls_ca_die removal-failed 'could not remove approved CA' 8
+    return 0
+  fi
+
+  command -v openssl >/dev/null 2>&1 ||
+    tls_ca_die openssl-unavailable 'OpenSSL is required for CA validation' 9
+  tls_ca_validate "$1" ||
+    tls_ca_die certificate-invalid 'expected exactly one valid public CA certificate in PEM format' 10
+  tls_ca_sha=$(tls_ca_fingerprint "$1") ||
+    tls_ca_die fingerprint-failed 'cannot compute certificate fingerprint' 11
+  printf '%s\n' "$tls_ca_sha" | grep -Eq '^[0-9a-f]{64}$' ||
+    tls_ca_die fingerprint-invalid 'unexpected SHA-256 digest' 12
+
+  umask 022
+  command -p -- mkdir -p -- "$tls_ca_dir" ||
+    tls_ca_die state-create-failed 'cannot create managed system CA directory' 13
+  [ -d "$tls_ca_conf" ] && [ ! -L "$tls_ca_conf" ] &&
+  [ -d "$tls_ca_dir" ] && [ ! -L "$tls_ca_dir" ] ||
+    tls_ca_die state-invalid 'managed CA directory is not a real directory' 5
+
+  tls_ca_target="$tls_ca_dir/$tls_ca_sha.pem"
+  if [ -e "$tls_ca_target" ] || [ -L "$tls_ca_target" ]
+  then
+    [ -f "$tls_ca_target" ] && [ ! -L "$tls_ca_target" ] ||
+      tls_ca_die certificate-collision 'managed CA entry is not a regular file' 14
+    tls_ca_existing=$(tls_ca_fingerprint "$tls_ca_target") ||
+      tls_ca_die certificate-collision 'cannot verify existing managed CA' 14
+    [ "$tls_ca_existing" = "$tls_ca_sha" ] ||
+      tls_ca_die certificate-collision 'existing CA content does not match fingerprint' 14
+    printf '%s\n' "$tls_ca_sha"
+    return 0
+  fi
+
+  tls_ca_tmp="$tls_ca_dir/.add.$$"
+  [ ! -e "$tls_ca_tmp" ] && [ ! -L "$tls_ca_tmp" ] ||
+    tls_ca_die temporary-collision 'CA staging pathname exists' 15
+  trap 'command -p -- rm -f -- "$tls_ca_tmp"' 0 HUP INT TERM
+  openssl x509 -in "$1" -out "$tls_ca_tmp" 2>/dev/null ||
+    tls_ca_die certificate-write-failed 'cannot stage normalized certificate' 16
+  command -p -- chmod 644 "$tls_ca_tmp" ||
+    tls_ca_die certificate-permissions-failed 'cannot set readable certificate permissions' 17
+  # Atomic publication of one complete certificate. No bundle-in-place rewrites.
+  command -p -- mv -- "$tls_ca_tmp" "$tls_ca_target" ||
+    tls_ca_die certificate-publish-failed 'cannot publish approved CA' 18
+  trap - 0 HUP INT TERM
+  printf '%s\n' "$tls_ca_sha"
+}
+
+tls_ca_main "$@"

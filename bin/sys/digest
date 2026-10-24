@@ -1,0 +1,126 @@
+#!/bin/sh
+
+[ -n "${m_ROOT:-}" ] || { printf '%s\n' 'digest: m environment not initialized' >&2; exit 1; }
+
+. "$m_LIB_DIR/sys/sh/core.lib.sh" || { printf '%s\n' 'digest: m shell runtime unavailable' >&2; exit 2; }
+
+digest_algorithm=
+digest_seen_delimiter=0
+
+while [ "$#" -gt 0 ]
+do
+  case "$1" in
+    -a)
+      [ "$#" -ge 2 ] || fatal 2 execution invalid-arguments operation digest
+      [ -z "$digest_algorithm" ] || fatal 2 execution invalid-arguments operation digest
+      digest_algorithm=$2
+      shift 2
+      ;;
+    --)
+      digest_seen_delimiter=1
+      shift
+      break
+      ;;
+    *)
+      fatal 2 execution invalid-arguments operation digest
+      ;;
+  esac
+done
+
+[ -n "$digest_algorithm" ] || fatal 2 execution invalid-arguments operation digest
+case "$digest_algorithm" in
+  sha256) digest_length=64;;
+  sha512) digest_length=128;;
+  md5) digest_length=32;;
+  *) fatal 2 execution invalid-arguments operation digest;;
+esac
+
+if [ "$digest_seen_delimiter" -eq 1 ]
+then
+  [ "$#" -eq 1 ] || fatal 2 execution invalid-arguments operation digest
+  digest_file=$1
+  [ -f "$digest_file" ] && [ -r "$digest_file" ] || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+  exec 3< "$digest_file" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+else
+  [ "$#" -eq 0 ] || fatal 2 execution invalid-arguments operation digest
+  exec 3<&0 || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+fi
+
+digest_output=
+digest_value=
+
+case "$digest_algorithm" in
+  sha256)
+    if command -v -- cksum >/dev/null 2>&1 && command -- cksum -a sha256 </dev/null >/dev/null 2>&1
+    then
+      digest_output="$(command -- cksum -a sha256 <&3)" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+      digest_value="$(printf -- '%s\n' "$digest_output" | LC_ALL=C command -p -- awk 'NF { value=$NF } END { print value }')" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+    elif command -v -- sha256sum >/dev/null 2>&1
+    then
+      digest_output="$(command -- sha256sum <&3)" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+      digest_value="$(printf -- '%s\n' "$digest_output" | LC_ALL=C command -p -- awk 'NF { print $1; exit }')" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+    elif command -v -- shasum >/dev/null 2>&1
+    then
+      digest_output="$(command -- shasum -a 256 <&3)" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+      digest_value="$(printf -- '%s\n' "$digest_output" | LC_ALL=C command -p -- awk 'NF { print $1; exit }')" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+    elif command -v -- openssl >/dev/null 2>&1
+    then
+      digest_output="$(command -- openssl dgst -sha256 <&3)" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+      digest_value="$(printf -- '%s\n' "$digest_output" | LC_ALL=C command -p -- awk 'NF { value=$NF } END { print value }')" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+    else
+      fatal execution command-not-found operation digest command sha256 algorithm "$digest_algorithm"
+    fi
+    ;;
+  sha512)
+    if command -v -- cksum >/dev/null 2>&1 && command -- cksum -a sha512 </dev/null >/dev/null 2>&1
+    then
+      digest_output="$(command -- cksum -a sha512 <&3)" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+      digest_value="$(printf -- '%s\n' "$digest_output" | LC_ALL=C command -p -- awk 'NF { value=$NF } END { print value }')" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+    elif command -v -- sha512sum >/dev/null 2>&1
+    then
+      digest_output="$(command -- sha512sum <&3)" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+      digest_value="$(printf -- '%s\n' "$digest_output" | LC_ALL=C command -p -- awk 'NF { print $1; exit }')" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+    elif command -v -- shasum >/dev/null 2>&1
+    then
+      digest_output="$(command -- shasum -a 512 <&3)" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+      digest_value="$(printf -- '%s\n' "$digest_output" | LC_ALL=C command -p -- awk 'NF { print $1; exit }')" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+    elif command -v -- openssl >/dev/null 2>&1
+    then
+      digest_output="$(command -- openssl dgst -sha512 <&3)" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+      digest_value="$(printf -- '%s\n' "$digest_output" | LC_ALL=C command -p -- awk 'NF { value=$NF } END { print value }')" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+    else
+      fatal execution command-not-found operation digest command sha512 algorithm "$digest_algorithm"
+    fi
+    ;;
+  md5)
+    if command -v -- cksum >/dev/null 2>&1 && command -- cksum -a md5 </dev/null >/dev/null 2>&1
+    then
+      digest_output="$(command -- cksum -a md5 <&3)" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+      digest_value="$(printf -- '%s\n' "$digest_output" | LC_ALL=C command -p -- awk 'NF { value=$NF } END { print value }')" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+    elif command -v -- md5sum >/dev/null 2>&1
+    then
+      digest_output="$(command -- md5sum <&3)" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+      digest_value="$(printf -- '%s\n' "$digest_output" | LC_ALL=C command -p -- awk 'NF { print $1; exit }')" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+    elif command -v -- md5 >/dev/null 2>&1
+    then
+      digest_output="$(command -- md5 -q <&3)" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+      digest_value="$(printf -- '%s\n' "$digest_output" | LC_ALL=C command -p -- awk 'NF { print $1; exit }')" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+    elif command -v -- openssl >/dev/null 2>&1
+    then
+      digest_output="$(command -- openssl dgst -md5 <&3)" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+      digest_value="$(printf -- '%s\n' "$digest_output" | LC_ALL=C command -p -- awk 'NF { value=$NF } END { print value }')" || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+    else
+      fatal execution command-not-found operation digest command md5 algorithm "$digest_algorithm"
+    fi
+    ;;
+esac
+
+exec 3<&-
+
+[ "${#digest_value}" -eq "$digest_length" ] || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+case "$digest_value" in
+  *[!0-9A-Fa-f]*) fatal execution execution-failed operation digest algorithm "$digest_algorithm";;
+esac
+
+printf -- '%s\n' "$digest_value" | LC_ALL=C command -p -- awk '{ print tolower($0) }' || fatal execution execution-failed operation digest algorithm "$digest_algorithm"
+exit 0

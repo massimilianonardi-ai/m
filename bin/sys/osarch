@@ -1,0 +1,307 @@
+#!/bin/sh
+
+[ -n "${m_ROOT:-}" ] || { printf '%s\n' 'osarch: m environment not initialized' >&2; exit 1; }
+
+. "$m_LIB_DIR/sys/sh/core.lib.sh" || { printf '%s\n' 'osarch: m shell runtime unavailable' >&2; exit 2; }
+
+osarch_valid()
+{
+  [ "$#" -eq 1 ] || return 2
+
+  case "$1" in
+    linux-x86_64|linux-arm64|macos-x86_64|macos-arm64|windows-x86_64|windows-arm64)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+osarch_selector_value()
+{
+  [ "$#" -eq 2 ] || return 2
+
+  osarch_selector_link="$1"
+  osarch_selector_prefix="$2"
+
+  [ -L "$osarch_selector_link" ] || return 1
+  osarch_selector_target="$(command -p -- readlink "$osarch_selector_link" 2>/dev/null)" || return 1
+
+  case "$osarch_selector_target" in
+    ""|*/*)
+      return 1
+      ;;
+  esac
+
+  case "$osarch_selector_prefix" in
+    sys)
+      case "$osarch_selector_target" in sys-*) osarch_selector_value_result="${osarch_selector_target#sys-}";; *) return 1;; esac
+      osarch_selector_resolved="$m_BIN_DIR/$osarch_selector_target"
+      [ -d "$osarch_selector_resolved" ] || return 1
+      ;;
+    ext)
+      case "$osarch_selector_target" in ext-*) osarch_selector_value_result="${osarch_selector_target#ext-}";; *) return 1;; esac
+      osarch_selector_resolved="$m_BIN_DIR/$osarch_selector_target"
+      [ -d "$osarch_selector_resolved" ] || return 1
+      ;;
+    ai)
+      case "$osarch_selector_target" in ai-*) osarch_selector_value_result="${osarch_selector_target#ai-}";; *) return 1;; esac
+      osarch_selector_resolved="$m_BIN_DIR/$osarch_selector_target"
+      [ -d "$osarch_selector_resolved" ] || return 1
+      ;;
+    env)
+      case "$osarch_selector_target" in env-*) osarch_selector_value_result="${osarch_selector_target#env-}";; *) return 1;; esac
+      osarch_selector_resolved="${osarch_selector_link%/*}/$osarch_selector_target"
+      [ -f "$osarch_selector_resolved" ] && [ ! -L "$osarch_selector_resolved" ] || return 1
+      ;;
+    *)
+      return 2
+      ;;
+  esac
+
+  osarch_valid "$osarch_selector_value_result" || return 1
+
+  printf -- '%s\n' "$osarch_selector_value_result"
+}
+
+osarch_current()
+{
+  osarch_current_sys="$(osarch_selector_value "$m_BIN_SYS_OSARCH_DIR" sys)" || return 1
+  osarch_current_ext="$(osarch_selector_value "$m_BIN_EXT_OSARCH_DIR" ext)" || return 2
+  osarch_current_ai="$(osarch_selector_value "$m_BIN_DIR/ai-osarch" ai)" || return 3
+  osarch_current_env="$(osarch_selector_value "$m_STATE_SYS_DIR/sys/environment/cache/env-osarch" env)" || return 4
+
+  [ "$osarch_current_ext" = "$osarch_current_sys" ] || return 2
+  [ "$osarch_current_ai" = "$osarch_current_sys" ] || return 3
+  [ "$osarch_current_env" = "$osarch_current_sys" ] || return 4
+
+  printf -- '%s\n' "$osarch_current_sys"
+}
+
+osarch_current_or_fatal()
+{
+  osarch_current_value="$(osarch_current)"
+  osarch_current_status="$?"
+
+  case "$osarch_current_status" in
+    0) :;;
+    1) fatal filesystem path-invalid path "$m_BIN_SYS_OSARCH_DIR";;
+    2) fatal filesystem path-invalid path "$m_BIN_EXT_OSARCH_DIR";;
+    3) fatal filesystem path-invalid path "$m_BIN_DIR/ai-osarch";;
+    4) fatal filesystem path-invalid path "$m_STATE_SYS_DIR/sys/environment/cache/env-osarch";;
+    *) fatal execution execution-failed operation osarch;;
+  esac
+}
+
+osarch_update_link()
+{
+  [ "$#" -eq 2 ] || return 3
+
+  osarch_link="$1"
+  osarch_target="$2"
+
+  if [ -e "$osarch_link" ] && [ ! -L "$osarch_link" ]
+  then
+    return 2
+  fi
+
+  osarch_tmp="${osarch_link}.tmp.$$"
+  command -p -- rm -f "$osarch_tmp" || return 1
+  command -p -- ln -s "$osarch_target" "$osarch_tmp" || return 1
+  command -p -- rm -f "$osarch_link" || {
+    command -p -- rm -f "$osarch_tmp" 2>/dev/null || :
+    return 1
+  }
+  command -p -- mv "$osarch_tmp" "$osarch_link" || {
+    command -p -- rm -f "$osarch_tmp" 2>/dev/null || :
+    return 1
+  }
+}
+
+osarch_restore_link()
+{
+  [ "$#" -eq 2 ] || return 2
+  osarch_restore_link_path=$1
+  osarch_restore_link_target=$2
+
+  if [ -n "$osarch_restore_link_target" ]
+  then
+    osarch_update_link "$osarch_restore_link_path" "$osarch_restore_link_target"
+  else
+    command -p -- rm -f -- "$osarch_restore_link_path"
+  fi
+}
+
+osarch_apply()
+{
+  [ "$#" -eq 1 ] || return 2
+
+  osarch_apply_value="$1"
+  osarch_valid "$osarch_apply_value" || return 2
+
+  osarch_sys_target="sys-$osarch_apply_value"
+  osarch_ext_target="ext-$osarch_apply_value"
+  osarch_ai_target="ai-$osarch_apply_value"
+  osarch_env_target="env-$osarch_apply_value"
+
+  osarch_sys_dir="$m_BIN_DIR/$osarch_sys_target"
+  osarch_ext_dir="$m_BIN_DIR/$osarch_ext_target"
+  osarch_ai_dir="$m_BIN_DIR/$osarch_ai_target"
+  osarch_ai_link="$m_BIN_DIR/ai-osarch"
+
+  osarch_env_dir="$m_STATE_SYS_DIR/sys/environment/cache"
+  osarch_env_file="$osarch_env_dir/$osarch_env_target"
+  osarch_env_link="$osarch_env_dir/env-osarch"
+
+  command -p -- mkdir -p "$osarch_sys_dir" "$osarch_ext_dir" "$osarch_ai_dir" "$osarch_env_dir" || return 1
+  valid_dir "$osarch_env_dir" || return 1
+
+  osarch_env_created=0
+  if [ ! -e "$osarch_env_file" ] && [ ! -L "$osarch_env_file" ]
+  then
+    osarch_env_generic="$osarch_env_dir/env"
+    if [ -e "$osarch_env_generic" ] || [ -L "$osarch_env_generic" ]
+    then
+      return 1
+    fi
+    : > "$osarch_env_file" || return 1
+    command -p -- chmod 644 "$osarch_env_file" || {
+      command -p -- rm -f -- "$osarch_env_file" 2>/dev/null || :
+      return 1
+    }
+    osarch_env_created=1
+  else
+    [ -f "$osarch_env_file" ] && [ ! -L "$osarch_env_file" ] || return 1
+  fi
+
+  for osarch_link in "$m_BIN_SYS_OSARCH_DIR" "$m_BIN_EXT_OSARCH_DIR" "$osarch_ai_link" "$osarch_env_link"
+  do
+    if [ -e "$osarch_link" ] && [ ! -L "$osarch_link" ]
+    then
+      [ "$osarch_env_created" -eq 0 ] || command -p -- rm -f -- "$osarch_env_file" 2>/dev/null || :
+      log error filesystem path-invalid path "$osarch_link"
+      return 1
+    fi
+  done
+
+  osarch_old_sys=
+  osarch_old_ext=
+  osarch_old_ai=
+  osarch_old_env=
+
+  if [ -L "$m_BIN_SYS_OSARCH_DIR" ]
+  then
+    osarch_old_sys="$(command -p -- readlink "$m_BIN_SYS_OSARCH_DIR")" || {
+      [ "$osarch_env_created" -eq 0 ] || command -p -- rm -f -- "$osarch_env_file" 2>/dev/null || :
+      return 1
+    }
+  fi
+  if [ -L "$m_BIN_EXT_OSARCH_DIR" ]
+  then
+    osarch_old_ext="$(command -p -- readlink "$m_BIN_EXT_OSARCH_DIR")" || {
+      [ "$osarch_env_created" -eq 0 ] || command -p -- rm -f -- "$osarch_env_file" 2>/dev/null || :
+      return 1
+    }
+  fi
+  if [ -L "$osarch_ai_link" ]
+  then
+    osarch_old_ai="$(command -p -- readlink "$osarch_ai_link")" || {
+      [ "$osarch_env_created" -eq 0 ] || command -p -- rm -f -- "$osarch_env_file" 2>/dev/null || :
+      return 1
+    }
+  fi
+  if [ -L "$osarch_env_link" ]
+  then
+    osarch_old_env="$(command -p -- readlink "$osarch_env_link")" || {
+      [ "$osarch_env_created" -eq 0 ] || command -p -- rm -f -- "$osarch_env_file" 2>/dev/null || :
+      return 1
+    }
+  fi
+
+  if ! osarch_update_link "$m_BIN_SYS_OSARCH_DIR" "$osarch_sys_target" ||
+     ! osarch_update_link "$m_BIN_EXT_OSARCH_DIR" "$osarch_ext_target" ||
+     ! osarch_update_link "$osarch_ai_link" "$osarch_ai_target" ||
+     ! osarch_update_link "$osarch_env_link" "$osarch_env_target"
+  then
+    osarch_restore_status=0
+    osarch_restore_link "$m_BIN_SYS_OSARCH_DIR" "$osarch_old_sys" || osarch_restore_status=1
+    osarch_restore_link "$m_BIN_EXT_OSARCH_DIR" "$osarch_old_ext" || osarch_restore_status=1
+    osarch_restore_link "$osarch_ai_link" "$osarch_old_ai" || osarch_restore_status=1
+    osarch_restore_link "$osarch_env_link" "$osarch_old_env" || osarch_restore_status=1
+    if [ "$osarch_env_created" -eq 1 ] && [ "$osarch_old_env" != "$osarch_env_target" ]
+    then
+      command -p -- rm -f -- "$osarch_env_file" 2>/dev/null || osarch_restore_status=1
+    fi
+    [ "$osarch_restore_status" -eq 0 ] || log error execution execution-failed operation osarch-rollback
+    return 1
+  fi
+
+  return 0
+}
+
+osarch_show_selector()
+{
+  [ "$#" -eq 2 ] || return 2
+
+  osarch_show_name="$1"
+  osarch_show_link="$2"
+
+  osarch_show_target="$(command -p -- readlink "$osarch_show_link" 2>/dev/null)" || return 1
+  readpathce osarch_show_resolved "$osarch_show_link" || return 1
+
+  printf -- '%s\n' "$osarch_show_name:"
+  printf -- '  link: %s\n' "$osarch_show_link"
+  printf -- '  target: %s\n' "$osarch_show_target"
+  printf -- '  resolved: %s\n' "$osarch_show_resolved"
+}
+
+if [ "$#" -eq 0 ]
+then
+  osarch_current_or_fatal
+  printf -- '%s\n' "$osarch_current_value"
+  exit 0
+fi
+
+case "$1" in
+  show)
+    [ "$#" -eq 1 ] || fatal execution invalid-arguments
+
+    osarch_current_or_fatal
+
+    case "$osarch_current_value" in
+      linux-*) osarch_current_os=linux; osarch_current_arch="${osarch_current_value#linux-}";;
+      macos-*) osarch_current_os=macos; osarch_current_arch="${osarch_current_value#macos-}";;
+      windows-*) osarch_current_os=windows; osarch_current_arch="${osarch_current_value#windows-}";;
+      *) fatal filesystem path-invalid path "$m_BIN_SYS_OSARCH_DIR";;
+    esac
+
+    printf -- 'osarch: %s\n' "$osarch_current_value"
+    printf -- 'os: %s\n' "$osarch_current_os"
+    printf -- 'arch: %s\n' "$osarch_current_arch"
+
+    osarch_show_selector sys-osarch "$m_BIN_SYS_OSARCH_DIR" || fatal filesystem path-invalid path "$m_BIN_SYS_OSARCH_DIR"
+    osarch_show_selector ext-osarch "$m_BIN_EXT_OSARCH_DIR" || fatal filesystem path-invalid path "$m_BIN_EXT_OSARCH_DIR"
+    osarch_show_selector ai-osarch "$m_BIN_DIR/ai-osarch" || fatal filesystem path-invalid path "$m_BIN_DIR/ai-osarch"
+    osarch_show_selector env-osarch "$m_STATE_SYS_DIR/sys/environment/cache/env-osarch" || fatal filesystem path-invalid path "$m_STATE_SYS_DIR/sys/environment/cache/env-osarch"
+    ;;
+
+  update)
+    [ "$#" -eq 1 ] || fatal execution invalid-arguments
+
+    loadsyslib "osarch"
+    osarch_valid "$m_OSARCH" || fatal system osarch-update-failure osarch "$m_OSARCH"
+
+    osarch_apply "$m_OSARCH" || fatal execution execution-failed operation osarch-update
+    ;;
+
+  set)
+    [ "$#" -eq 2 ] || fatal execution invalid-arguments
+    osarch_valid "$2" || fatal execution invalid-arguments osarch "$2"
+
+    osarch_apply "$2" || fatal execution execution-failed operation osarch-set
+    ;;
+
+  *)
+    fatal execution invalid-arguments
+    ;;
+esac

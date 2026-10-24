@@ -1,0 +1,242 @@
+#!/bin/sh
+
+[ -n "${m_ROOT:-}" ] || { printf '%s\n' 'tls-nss-sync: m environment not initialized' >&2; exit 1; }
+
+# Linux NSS projection of the additional public CAs authorized in m system conf.
+# This command does not change browser profiles, client keys or the host store.
+tls_nss_fail()
+{
+  printf 'tls-nss-sync.%s: %s\n' "$1" "$2" >&2
+  exit "$3"
+}
+
+tls_nss_digest()
+{
+  openssl x509 -in "$1" -outform DER 2>/dev/null |
+    openssl dgst -sha256 -r 2>/dev/null | awk '{print $1}'
+}
+
+tls_nss_valid_sha()
+{
+  [ "$#" -eq 1 ] || return 2
+  [ "${#1}" -eq 64 ] || return 1
+  case "$1" in
+    *[!0123456789abcdef]* | "") return 1 ;;
+  esac
+  return 0
+}
+
+tls_nss_present()
+{
+  certutil -L -d "sql:$tls_nss_db" -n "m-tls-$1" >/dev/null 2>&1
+}
+
+tls_nss_validate_owned()
+{
+  tls_nss_actual=$(certutil -L -d "sql:$tls_nss_db" -n "m-tls-$1" -a 2>/dev/null |
+    tls_nss_digest /dev/stdin)
+  [ "$tls_nss_actual" = "$1" ] || return 1
+  certutil -L -d "sql:$tls_nss_db" 2>/dev/null |
+    awk -v n="m-tls-$1" '$1 == n && $2 == "C,," { found=1 } END { exit !found }'
+}
+
+tls_nss_main()
+{
+  [ "$#" -eq 1 ] || tls_nss_fail invalid-arguments 'expected effective browser HOME' 2
+  [ -d "$1" ] && [ ! -L "$1" ] ||
+    tls_nss_fail home-invalid 'effective browser HOME must be a real directory' 3
+  tls_nss_home=$1
+  case "$m_OSARCH" in
+    linux-*) : ;;
+    *) tls_nss_fail backend-unavailable 'NSS projection is currently Linux-only' 4 ;;
+  esac
+
+  tls_nss_conf=$( "$m_ROOT/m" "$m_BIN_DIR/sys/state-path" system sys tls conf ) ||
+    tls_nss_fail authority-resolution-failed 'cannot resolve system TLS configuration' 5
+  tls_nss_ca="$tls_nss_conf/ca"
+  tls_nss_state="$tls_nss_home/.m"
+  tls_nss_owned="$tls_nss_state/tls-nss-owned"
+
+  [ ! -L "$tls_nss_conf" ] && [ ! -L "$tls_nss_ca" ] ||
+    tls_nss_fail authority-invalid 'symbolic link in system CA configuration' 6
+  if [ -e "$tls_nss_ca" ] && [ ! -d "$tls_nss_ca" ]
+  then
+    tls_nss_fail authority-invalid 'system CA configuration is not a directory' 6
+  fi
+  [ ! -L "$tls_nss_owned" ] ||
+    tls_nss_fail manifest-invalid 'owned-certificate manifest is a symbolic link' 7
+
+  # Avoid allocating NSS databases or requiring NSS tools in installations with
+  # no authorized extra CAs and no prior managed projection.
+  tls_nss_have_ca=0
+  for tls_nss_file in "$tls_nss_ca"/*.pem
+  do
+    [ -e "$tls_nss_file" ] || [ -L "$tls_nss_file" ] || continue
+    tls_nss_have_ca=1
+    break
+  done
+  if [ "$tls_nss_have_ca" -eq 0 ] && [ ! -e "$tls_nss_owned" ]
+  then
+    return 0
+  fi
+
+  [ -L "$m_STATE_SYS_DIR" ] && [ -d "$m_STATE_SYS_DIR" ] ||
+    tls_nss_fail system-selector-invalid 'selected system state profile is unavailable' 28
+
+  for tls_nss_tool in certutil openssl flock
+  do
+    command -v "$tls_nss_tool" >/dev/null 2>&1 ||
+      tls_nss_fail dependency-unavailable "required NSS projection tool: $tls_nss_tool" 8
+  done
+
+  umask 077
+  [ ! -L "$tls_nss_state" ] ||
+    tls_nss_fail state-invalid 'managed HOME state is a symbolic link' 9
+  command -p -- mkdir -p -- "$tls_nss_state" ||
+    tls_nss_fail state-create-failed 'cannot create managed browser state' 10
+  [ -d "$tls_nss_state" ] && [ ! -L "$tls_nss_state" ] ||
+    tls_nss_fail state-invalid 'managed HOME state is not a real directory' 9
+  [ ! -L "$tls_nss_state/tls-nss.lock" ] ||
+    tls_nss_fail lock-invalid 'NSS lock pathname is a symbolic link' 11
+  exec 9>"$tls_nss_state/tls-nss.lock" ||
+    tls_nss_fail lock-open-failed 'cannot open browser NSS lock' 12
+  flock -x 9 ||
+    tls_nss_fail lock-failed 'cannot lock browser NSS synchronization' 13
+
+  tls_nss_tmp="$tls_nss_state/.tls-nss.$$"
+  [ ! -e "$tls_nss_tmp" ] && [ ! -L "$tls_nss_tmp" ] ||
+    tls_nss_fail temporary-collision 'NSS staging pathname already exists' 14
+  command -p -- mkdir -- "$tls_nss_tmp" ||
+    tls_nss_fail temporary-create-failed 'cannot stage NSS reconciliation' 15
+  trap 'command -p -- rm -rf -- "$tls_nss_tmp"' 0 HUP INT TERM
+  : > "$tls_nss_tmp/desired"
+  : > "$tls_nss_tmp/old"
+  if [ -e "$tls_nss_owned" ]
+  then
+    [ -f "$tls_nss_owned" ] && [ ! -L "$tls_nss_owned" ] ||
+      tls_nss_fail manifest-invalid 'owned-certificate manifest is not a regular file' 7
+    command -p -- cp -- "$tls_nss_owned" "$tls_nss_tmp/old" ||
+      tls_nss_fail manifest-read-failed 'cannot read owned certificates' 16
+  fi
+  while IFS= read -r tls_nss_sha
+  do
+    tls_nss_valid_sha "$tls_nss_sha" ||
+      tls_nss_fail manifest-invalid 'owned-certificate manifest contains an invalid fingerprint' 7
+  done < "$tls_nss_tmp/old"
+
+  for tls_nss_file in "$tls_nss_ca"/*.pem
+  do
+    [ -e "$tls_nss_file" ] || [ -L "$tls_nss_file" ] || continue
+    [ -f "$tls_nss_file" ] && [ ! -L "$tls_nss_file" ] ||
+      tls_nss_fail anchor-invalid 'system trust anchor is not a regular file' 17
+    tls_nss_sha=$(basename -- "$tls_nss_file" .pem)
+    tls_nss_valid_sha "$tls_nss_sha" ||
+      tls_nss_fail anchor-invalid 'system CA filename is not a fingerprint' 17
+    [ "$(tls_nss_digest "$tls_nss_file")" = "$tls_nss_sha" ] ||
+      tls_nss_fail anchor-invalid 'system CA content does not match its fingerprint' 17
+    openssl x509 -in "$tls_nss_file" -noout -ext basicConstraints 2>/dev/null |
+      grep -q 'CA:TRUE' ||
+      tls_nss_fail anchor-invalid 'system trust anchor is not a CA' 17
+    printf '%s\n' "$tls_nss_sha" >> "$tls_nss_tmp/desired"
+  done
+  LC_ALL=C sort -u "$tls_nss_tmp/desired" > "$tls_nss_tmp/sorted" ||
+    tls_nss_fail anchor-read-failed 'cannot enumerate approved certificates' 18
+  command -p -- mv -- "$tls_nss_tmp/sorted" "$tls_nss_tmp/desired" ||
+    tls_nss_fail anchor-read-failed 'cannot publish temporary desired set' 18
+
+  # Respect the existing legacy database; newer Chromium otherwise defaults
+  # to HOME/.local/share/pki/nssdb (M146 onward).
+  [ ! -L "$tls_nss_home/.pki" ] && [ ! -L "$tls_nss_home/.pki/nssdb" ] ||
+    tls_nss_fail database-invalid 'legacy NSS directory is a symbolic link' 19
+  if [ -e "$tls_nss_home/.pki/nssdb" ]
+  then
+    [ -d "$tls_nss_home/.pki/nssdb" ] ||
+      tls_nss_fail database-invalid 'legacy NSS database path is not a directory' 19
+    tls_nss_db="$tls_nss_home/.pki/nssdb"
+  else
+    for tls_nss_dir in "$tls_nss_home/.local" "$tls_nss_home/.local/share" "$tls_nss_home/.local/share/pki" "$tls_nss_home/.local/share/pki/nssdb"
+    do
+      [ ! -L "$tls_nss_dir" ] ||
+        tls_nss_fail database-invalid 'NSS database ancestor is a symbolic link' 19
+    done
+    tls_nss_db="$tls_nss_home/.local/share/pki/nssdb"
+    command -p -- mkdir -p -- "$tls_nss_db" ||
+      tls_nss_fail database-create-failed 'cannot create NSS database directory' 20
+  fi
+  for tls_nss_entry in "$tls_nss_db/cert9.db" "$tls_nss_db/key4.db" "$tls_nss_db/pkcs11.txt"
+  do
+    [ ! -L "$tls_nss_entry" ] ||
+      tls_nss_fail database-invalid 'NSS database contains a symbolic link' 19
+  done
+  if [ ! -f "$tls_nss_db/cert9.db" ]
+  then
+    [ ! -e "$tls_nss_db/cert8.db" ] ||
+      tls_nss_fail database-invalid 'legacy DBM NSS database must be migrated separately' 19
+    certutil -N --empty-password -d "sql:$tls_nss_db" >/dev/null 2>&1 ||
+      tls_nss_fail database-initialize-failed 'cannot initialize NSS database' 21
+  fi
+
+  # Preflight all existing m-owned entries before mutating anything. Never
+  # take over a matching nickname that is not in our existing ownership record.
+  while IFS= read -r tls_nss_sha
+  do
+    if tls_nss_present "$tls_nss_sha"
+    then
+      tls_nss_validate_owned "$tls_nss_sha" ||
+        tls_nss_fail owned-entry-modified 'an existing managed NSS entry was modified' 22
+    fi
+  done < "$tls_nss_tmp/old"
+  while IFS= read -r tls_nss_sha
+  do
+    if tls_nss_present "$tls_nss_sha" &&
+       ! grep -Fqx -- "$tls_nss_sha" "$tls_nss_tmp/old"
+    then
+      tls_nss_fail nickname-collision 'refusing to take ownership of a pre-existing NSS entry' 23
+    fi
+  done < "$tls_nss_tmp/desired"
+
+  # Write ahead: if interrupted during import, the next launch can safely
+  # resume from the union of existing and desired owned certificate identities.
+  cat "$tls_nss_tmp/old" "$tls_nss_tmp/desired" | LC_ALL=C sort -u > "$tls_nss_tmp/union" ||
+    tls_nss_fail manifest-write-failed 'cannot stage managed ownership record' 24
+  command -p -- mv -- "$tls_nss_tmp/union" "$tls_nss_owned" ||
+    tls_nss_fail manifest-write-failed 'cannot publish managed ownership record' 24
+
+  while IFS= read -r tls_nss_sha
+  do
+    if ! grep -Fqx -- "$tls_nss_sha" "$tls_nss_tmp/desired"
+    then
+      if tls_nss_present "$tls_nss_sha"
+      then
+        certutil -D -d "sql:$tls_nss_db" -f /dev/null -n "m-tls-$tls_nss_sha" >/dev/null 2>&1 ||
+          tls_nss_fail certificate-remove-failed 'cannot revoke managed NSS certificate' 25
+      fi
+    fi
+  done < "$tls_nss_tmp/old"
+
+  while IFS= read -r tls_nss_sha
+  do
+    if ! tls_nss_present "$tls_nss_sha"
+    then
+      certutil -A -d "sql:$tls_nss_db" -f /dev/null -n "m-tls-$tls_nss_sha" -t 'C,,' -i "$tls_nss_ca/$tls_nss_sha.pem" >/dev/null 2>&1 ||
+        tls_nss_fail certificate-import-failed 'cannot import approved NSS CA' 26
+    fi
+    tls_nss_validate_owned "$tls_nss_sha" ||
+      tls_nss_fail certificate-verify-failed 'imported NSS CA or trust flags are invalid' 27
+  done < "$tls_nss_tmp/desired"
+
+  if [ ! -s "$tls_nss_tmp/desired" ]
+  then
+    # Once all managed CAs are revoked, subsequent launches are true no-ops.
+    # Remove the write-ahead ownership file only after NSS deletion succeeds.
+    command -p -- rm -f -- "$tls_nss_owned" ||
+      tls_nss_fail manifest-write-failed 'cannot remove empty NSS ownership record' 24
+  else
+    command -p -- cp -- "$tls_nss_tmp/desired" "$tls_nss_tmp/final" ||
+      tls_nss_fail manifest-write-failed 'cannot stage final NSS ownership' 24
+    command -p -- mv -- "$tls_nss_tmp/final" "$tls_nss_owned" ||
+      tls_nss_fail manifest-write-failed 'cannot finalize NSS ownership record' 24
+  fi
+}
+
+tls_nss_main "$@"

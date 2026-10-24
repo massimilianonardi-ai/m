@@ -1,0 +1,59 @@
+#!/bin/sh
+
+[ -n "${m_ROOT:-}" ] || { printf '%s\n' 'state-path: m environment not initialized' >&2; exit 1; }
+
+. "$m_LIB_DIR/sys/sh/core.lib.sh" || { printf '%s\n' 'state-path: m shell runtime unavailable' >&2; exit 2; }
+
+state_path_name_valid()
+{
+  [ "$#" -eq 1 ] || return 2
+  case "$1" in
+    "" | [!abcdefghijklmnopqrstuvwxyz0123456789]* | *[!abcdefghijklmnopqrstuvwxyz0123456789._-]* | *[._-]) return 1 ;;
+  esac
+}
+
+[ "$#" -eq 4 ] || [ "$#" -eq 5 ] || fatal 2 execution invalid-arguments operation state-path
+
+state_path_scope=$1
+state_path_owner=$2
+state_path_identity=$3
+state_path_area=$4
+state_path_instance=${5-}
+
+case "$state_path_scope" in
+  system)
+    state_path_root=$m_STATE_SYS_DIR
+    ;;
+  user)
+    if [ -L "$m_STATE_USER_DIR" ]
+    then
+      state_path_root=$m_STATE_USER_DIR
+    else
+      state_path_root="$m_STATE_DIR/user/default"
+    fi
+    ;;
+  *)
+    fatal 2 execution invalid-arguments operation state-path
+    ;;
+esac
+
+case "$state_path_owner" in
+  sys | ai | pkg) : ;;
+  *) fatal 2 execution invalid-arguments operation state-path ;;
+esac
+
+state_path_name_valid "$state_path_identity" || fatal 2 execution invalid-arguments operation state-path
+
+case "$state_path_area" in
+  conf | data | home | cache | log | run | tmp) : ;;
+  *) fatal 2 execution invalid-arguments operation state-path ;;
+esac
+
+if [ -n "$state_path_instance" ]
+then
+  [ "$state_path_owner" = pkg ] || fatal 2 execution invalid-arguments operation state-path
+  state_path_name_valid "$state_path_instance" || fatal 2 execution invalid-arguments operation state-path
+  state_path_identity="$state_path_identity@!$state_path_instance"
+fi
+
+printf -- '%s/%s/%s/%s\n' "$state_path_root" "$state_path_owner" "$state_path_identity" "$state_path_area"

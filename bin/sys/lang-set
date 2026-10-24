@@ -1,0 +1,180 @@
+#!/bin/sh
+
+[ -n "${m_ROOT:-}" ] || { printf '%s\n' 'lang-set: m environment not initialized' >&2; exit 1; }
+
+. "$m_LIB_DIR/sys/sh/core.lib.sh" || { printf '%s\n' 'lang-set: m shell runtime unavailable' >&2; exit 2; }
+
+lang_set_selector_name()
+{
+  [ "$#" -eq 1 ] || return 2
+  [ -d "$1" ] && [ ! -L "$1" ] || return 1
+  [ -L "$1/current" ] || return 1
+
+  lang_set_selector_target="$(command -p -- readlink "$1/current" 2>/dev/null)" || return 1
+  case "$lang_set_selector_target" in
+    "" | */* | "." | "..") return 1 ;;
+  esac
+
+  [ -d "$1/$lang_set_selector_target" ] && [ ! -L "$1/$lang_set_selector_target" ] || return 1
+  printf -- '%s\n' "$lang_set_selector_target"
+}
+
+lang_set_cleanup_prepared()
+{
+  for lang_set_owner_dir in "$m_RES_DIR"/*
+  do
+    [ -d "$lang_set_owner_dir" ] && [ ! -L "$lang_set_owner_dir" ] || continue
+    lang_set_owner_lang_dir="$lang_set_owner_dir/lang"
+    [ -d "$lang_set_owner_lang_dir" ] && [ ! -L "$lang_set_owner_lang_dir" ] || continue
+    command -p -- rm -f -- \
+      "$lang_set_owner_lang_dir/.current.new.$$" \
+      "$lang_set_owner_lang_dir/.current.old.$$" 2>/dev/null || :
+  done
+}
+
+lang_set_rollback()
+{
+  lang_set_rollback_status=0
+
+  for lang_set_owner_dir in "$m_RES_DIR"/*
+  do
+    [ -d "$lang_set_owner_dir" ] && [ ! -L "$lang_set_owner_dir" ] || continue
+    lang_set_owner_lang_dir="$lang_set_owner_dir/lang"
+    [ -d "$lang_set_owner_lang_dir" ] && [ ! -L "$lang_set_owner_lang_dir" ] || continue
+
+    lang_set_old="$lang_set_owner_lang_dir/.current.old.$$"
+    lang_set_new="$lang_set_owner_lang_dir/.current.new.$$"
+    lang_set_current="$lang_set_owner_lang_dir/current"
+
+    command -p -- rm -f -- "$lang_set_new" 2>/dev/null || lang_set_rollback_status=1
+
+    [ -L "$lang_set_old" ] || continue
+
+    if [ -e "$lang_set_current" ] || [ -L "$lang_set_current" ]
+    then
+      if [ ! -L "$lang_set_current" ] || ! command -p -- rm -f -- "$lang_set_current"
+      then
+        lang_set_rollback_status=1
+        continue
+      fi
+    fi
+
+    command -p -- mv -- "$lang_set_old" "$lang_set_current" || lang_set_rollback_status=1
+  done
+
+  if [ "$lang_set_rollback_status" -eq 0 ]
+  then
+    lang_set_cleanup_prepared
+  fi
+
+  return "$lang_set_rollback_status"
+}
+
+lang_set_switch()
+{
+  [ "$#" -eq 1 ] || return 2
+
+  lang_set_switch_current="$1/current"
+  lang_set_switch_new="$1/.current.new.$$"
+
+  [ -L "$lang_set_switch_current" ] || return 1
+  [ -L "$lang_set_switch_new" ] || return 1
+
+  command -p -- rm -f -- "$lang_set_switch_current" || return 1
+  command -p -- mv -- "$lang_set_switch_new" "$lang_set_switch_current" || return 1
+}
+
+[ "$#" -le 1 ] || fatal execution invalid-arguments
+
+if [ "$#" -eq 0 ]
+then
+  lang_set_current="$(lang_set_selector_name "$m_LANG_DIR")" || fatal filesystem path-invalid path "$m_LANG_CURRENT_DIR"
+  printf -- '%s\n' "$lang_set_current"
+  exit 0
+fi
+
+lang_set_requested=$1
+
+[ -d "$m_RES_DIR" ] && [ ! -L "$m_RES_DIR" ] || fatal filesystem path-invalid path "$m_RES_DIR"
+[ -d "$m_LANG_DIR" ] && [ ! -L "$m_LANG_DIR" ] || fatal filesystem path-invalid path "$m_LANG_DIR"
+
+lang_set_sys_seen=0
+
+for lang_set_owner_dir in "$m_RES_DIR"/*
+do
+  [ -d "$lang_set_owner_dir" ] && [ ! -L "$lang_set_owner_dir" ] || continue
+  lang_set_owner_lang_dir="$lang_set_owner_dir/lang"
+  [ -d "$lang_set_owner_lang_dir" ] && [ ! -L "$lang_set_owner_lang_dir" ] || continue
+
+  [ "$lang_set_owner_lang_dir" != "$m_LANG_DIR" ] || lang_set_sys_seen=1
+
+  lang_set_available=0
+  for lang_set_locale_dir in "$lang_set_owner_lang_dir"/*
+  do
+    [ -d "$lang_set_locale_dir" ] && [ ! -L "$lang_set_locale_dir" ] || continue
+    lang_set_locale_name=${lang_set_locale_dir##*/}
+    if [ "$lang_set_locale_name" = "$lang_set_requested" ]
+    then
+      lang_set_available=1
+      break
+    fi
+  done
+  [ "$lang_set_available" -eq 1 ] || fatal execution invalid-arguments language "$lang_set_requested"
+
+  lang_set_selector_name "$lang_set_owner_lang_dir" >/dev/null || \
+    fatal filesystem path-invalid path "$lang_set_owner_lang_dir/current"
+
+  for lang_set_tmp in \
+    "$lang_set_owner_lang_dir/.current.new.$$" \
+    "$lang_set_owner_lang_dir/.current.old.$$"
+  do
+    if [ -e "$lang_set_tmp" ] || [ -L "$lang_set_tmp" ]
+    then
+      fatal filesystem path-invalid path "$lang_set_tmp"
+    fi
+  done
+done
+
+[ "$lang_set_sys_seen" -eq 1 ] || fatal filesystem path-invalid path "$m_LANG_DIR"
+
+for lang_set_owner_dir in "$m_RES_DIR"/*
+do
+  [ -d "$lang_set_owner_dir" ] && [ ! -L "$lang_set_owner_dir" ] || continue
+  lang_set_owner_lang_dir="$lang_set_owner_dir/lang"
+  [ -d "$lang_set_owner_lang_dir" ] && [ ! -L "$lang_set_owner_lang_dir" ] || continue
+
+  lang_set_previous="$(lang_set_selector_name "$lang_set_owner_lang_dir")" || {
+    lang_set_cleanup_prepared
+    fatal filesystem path-invalid path "$lang_set_owner_lang_dir/current"
+  }
+
+  command -p -- ln -s -- "$lang_set_previous" "$lang_set_owner_lang_dir/.current.old.$$" || {
+    lang_set_cleanup_prepared
+    fatal execution execution-failed operation lang-set
+  }
+
+  command -p -- ln -s -- "$lang_set_requested" "$lang_set_owner_lang_dir/.current.new.$$" || {
+    lang_set_cleanup_prepared
+    fatal execution execution-failed operation lang-set
+  }
+done
+
+for lang_set_owner_dir in "$m_RES_DIR"/*
+do
+  [ -d "$lang_set_owner_dir" ] && [ ! -L "$lang_set_owner_dir" ] || continue
+  lang_set_owner_lang_dir="$lang_set_owner_dir/lang"
+  [ -d "$lang_set_owner_lang_dir" ] && [ ! -L "$lang_set_owner_lang_dir" ] || continue
+  [ "$lang_set_owner_lang_dir" != "$m_LANG_DIR" ] || continue
+
+  lang_set_switch "$lang_set_owner_lang_dir" || {
+    lang_set_rollback || :
+    fatal execution execution-failed operation lang-set
+  }
+done
+
+lang_set_switch "$m_LANG_DIR" || {
+  lang_set_rollback || :
+  fatal execution execution-failed operation lang-set
+}
+
+lang_set_cleanup_prepared
