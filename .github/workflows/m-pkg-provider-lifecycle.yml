@@ -79,23 +79,24 @@ jobs:
             echo 'FAIL: implicit global provider selection' >&2
             exit 11
           fi
-          if ./m pkg provider default nodejs nodejs
+          # Package-default 'node' already owns the public command.
+          # Facility-default publication must reject that foreign projection.
+          if ./m pkg provider default nodejs nodejs >/dev/null 2>&1
           then
-            :
-          else
-            echo 'PROVIDER DEFAULT FAILED: diagnostic trace of original provider library' >&2
-            ./m sh -c '
-              . "$m_LIB_DIR/sys/sh/core.lib.sh" || exit 1
-              loadsyslib "pkg/pkg-provider" || exit 2
-              set -x
-              _pkg_provider_default nodejs nodejs
-            ' || :
+            echo 'FAIL: provider default stole the package-owned command' >&2
             exit 19
           fi
-          [ "$(./m pkg provider default nodejs)" = nodejs ]
+          [ "$(./m pkg default nodejs)" = "$node_concrete" ]
+          if ./m pkg provider default nodejs >/dev/null 2>&1; then exit 20; fi
+
+          # A deliberate owner transition frees the command; a pinned
+          # facility default can now publish it without losing the provider.
+          ./m pkg default -u -- nodejs
+          ./m pkg provider default nodejs "$node_concrete"
+          [ "$(./m pkg provider default nodejs)" = "$node_concrete" ]
           [ "$(./m pkg requirement resolve nodejs '=26')" = "$node_concrete" ]
-          ./m pkg provider bind jsc nodejs nodejs
-          [ "$(./m pkg provider bind jsc nodejs)" = nodejs ]
+          ./m pkg provider bind jsc nodejs "$node_concrete"
+          [ "$(./m pkg provider bind jsc nodejs)" = "$node_concrete" ]
 
           work=$(mktemp -d)
           trap 'rm -rf -- "$work"' 0
@@ -110,6 +111,7 @@ jobs:
           if ./m pkg provider bind jsc nodejs >/dev/null 2>&1; then exit 12; fi
           ./m pkg provider default -u -- nodejs
           if ./m pkg requirement resolve nodejs '=26' >/dev/null 2>&1; then exit 13; fi
+          ./m pkg default "$node_concrete"
           ./m jsc "$work/modules.json" "$work/recompiled.js"
           [ -s "$work/recompiled.js" ]
 
@@ -126,6 +128,7 @@ jobs:
           if ./m pkg versions nodejs >/dev/null 2>&1; then exit 18; fi
           ./m pkg install mk@v0.1.0
           [ "$(./m pkg default mk)" = mk@v0.1.0 ]
-          ./m mk --help > /dev/null
+          ./m node -p '6*7' > "$work/second-node.txt"
+          [ "$(cat "$work/second-node.txt")" = 42 ]
 
           echo 'PASS: public pkg dependencies, provider settings, runtime and uninstall/reinstall'
