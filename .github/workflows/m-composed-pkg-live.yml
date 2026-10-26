@@ -1,0 +1,46 @@
+name: m public independent packages integration
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        package:
+          - name: mk
+            tests_ref: 4880b4676ed6d7f46965a41f7e9b3d4d867ddf18
+          - name: jsc
+            tests_ref: 952b97dd291cf178362f541129640f3375841b04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - name: Checkout the exact tested m source revision
+        uses: actions/checkout@v4
+        with:
+          path: m-source
+          persist-credentials: false
+      - name: Checkout independently maintained published-package integration test
+        uses: actions/checkout@v4
+        with:
+          repository: massimilianonardi-ai/m-${{ matrix.package.name }}
+          ref: ${{ matrix.package.tests_ref }}
+          path: pkg-source
+          persist-credentials: false
+      - name: Verify actual catalog-backed install and runtime of published ${{ matrix.package.name }}
+        shell: sh
+        run: |
+          set -eu
+          [ "$(git -C m-source rev-parse HEAD)" = "$GITHUB_SHA" ]
+          [ ! -e m-source/bin/sys/mk ]
+          [ ! -e m-source/bin/sys/jsc ]
+          [ ! -e m-source/lib/sys/js/mk.lib.js ]
+          [ ! -e m-source/lib/sys/js/jsc.lib.js ]
+          sh pkg-source/tests/install-live.sh m-source
