@@ -106,19 +106,24 @@ jobs:
             [ "$(pkg_repository_compare_versions "$1" 153.0.8010.36-1 153.0.8010.36-2)" = -1 ]
           ' sh "$browser_adapters/chrome"
           CHROMIUM_HTTP_LOG="$browser_adapters/chromium-http.log"
-          export CHROMIUM_HTTP_LOG
+          CHROMIUM_HTTP_BIN="$browser_adapters/bin"
+          export CHROMIUM_HTTP_LOG CHROMIUM_HTTP_BIN
+          mkdir -p "$CHROMIUM_HTTP_BIN"
           : > "$CHROMIUM_HTTP_LOG"
+          # HTTP sentinel is test-only, outside m. It asserts that comparison
+          # never invokes the real transport and exact resolution still does.
+          cat > "$CHROMIUM_HTTP_BIN/http-fetch" <<'EOF_HTTP'
+          #!/bin/sh
+          printf '%s\\n' "$*" >> "$CHROMIUM_HTTP_LOG"
+          exit 97
+          EOF_HTTP
+          chmod 700 "$CHROMIUM_HTTP_BIN/http-fetch"
           ./m sh -c '
             . "$m_LIB_DIR/sys/sh/core.lib.sh" || exit 1
             loadsyslib "pkg/repository/pkg-repository-chromium" || exit 1
             command -v pkg_repository_resolve_artifact > /dev/null || exit 1
-
-            # Instrument only the HTTP boundary. The real adapter, its
-            # repository validation and numeric comparison must still run.
-            http-fetch() {
-              printf "%s\\n" "$*" >> "$CHROMIUM_HTTP_LOG"
-              return 97
-            }
+            PATH="$CHROMIUM_HTTP_BIN:$PATH"
+            export PATH
 
             [ "$(pkg_repository_compare_versions "$1" 100 200)" = -1 ] || exit 1
             [ "$(pkg_repository_compare_versions "$1" 200 200)" = 0 ] || exit 1
