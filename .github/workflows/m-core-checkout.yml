@@ -105,11 +105,43 @@ jobs:
             loadsyslib "pkg/repository/pkg-repository-chrome" || exit 1
             [ "$(pkg_repository_compare_versions "$1" 153.0.8010.36-1 153.0.8010.36-2)" = -1 ]
           ' sh "$browser_adapters/chrome"
+          CHROMIUM_HTTP_LOG="$browser_adapters/chromium-http.log"
+          export CHROMIUM_HTTP_LOG
+          : > "$CHROMIUM_HTTP_LOG"
           ./m sh -c '
             . "$m_LIB_DIR/sys/sh/core.lib.sh" || exit 1
             loadsyslib "pkg/repository/pkg-repository-chromium" || exit 1
             command -v pkg_repository_resolve_artifact > /dev/null || exit 1
-            if pkg_repository_resolve_version "$1" invalid >/dev/null 2>&1; then
+
+            # Instrument only the HTTP boundary. The real adapter, its
+            # repository validation and numeric comparison must still run.
+            http-fetch() {
+              printf "%s\\n" "$*" >> "$CHROMIUM_HTTP_LOG"
+              return 97
+            }
+
+            [ "$(pkg_repository_compare_versions "$1" 100 200)" = -1 ] || exit 1
+            [ "$(pkg_repository_compare_versions "$1" 200 200)" = 0 ] || exit 1
+            [ "$(pkg_repository_compare_versions "$1" 200 100)" = 1 ] || exit 1
+            [ "$(pkg_repository_compare_versions "$1" 333 200)" = 1 ] || exit 1
+            [ "$(pkg_repository_compare_versions "$1" 999999999999999999999999 1000000000000000000000000)" = -1 ] || exit 1
+            [ ! -s "$CHROMIUM_HTTP_LOG" ] || exit 1
+
+            for bad in 0 01 invalid; do
+              if pkg_repository_compare_versions "$1" "$bad" 200 >/dev/null 2>&1; then
+                exit 1
+              fi
+            done
+            [ ! -s "$CHROMIUM_HTTP_LOG" ] || exit 1
+
+            # Exact resolution still demands current upstream metadata.
+            if pkg_repository_resolve_version "$1" 100 >/dev/null 2>&1; then
+              exit 1
+            fi
+            [ -s "$CHROMIUM_HTTP_LOG" ] || exit 1
+
+            printf "unexpected\\n" > "$1/unexpected"
+            if pkg_repository_compare_versions "$1" 100 200 >/dev/null 2>&1; then
               exit 1
             fi
           ' sh "$browser_adapters/chromium"
