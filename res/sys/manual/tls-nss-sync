@@ -32,6 +32,9 @@ DESCRIPTION
     this operation through launcher_nss in pkg-launch.lib.sh.
 
 DEPENDENCIES
+    The m core and osarch shell libraries are required to detect the host
+    platform independently in this command process.
+
     For nonempty projection work, certutil from NSS, OpenSSL and Linux flock
     are required. The browser HOME must be a real writable directory.
     Existing NSS DBs with unsupported/password-protected configurations may
@@ -46,6 +49,8 @@ EXIT STATUS
     0     The owned NSS projection is reconciled or no work is necessary.
     2-28  Specific validation, dependency, locking, NSS or filesystem
           failure, diagnosed on stderr with tls-nss-sync.<branch> identity.
+    29    Unable to load the m shell runtime.
+    30    Unable to load the host-platform shell library.
 
 SEE ALSO
     tls-ca

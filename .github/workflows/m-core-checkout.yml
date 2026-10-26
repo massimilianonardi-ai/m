@@ -51,6 +51,29 @@ jobs:
           } || :
           ./m tls-ca list > /dev/null
 
+          # A fresh browser HOME with no approved CAs requires no NSS tools,
+          # database creation or inherited platform environment.
+          unset m_OSARCH m_OSARCH_OS m_OSARCH_ARCH
+          nss_home=$(mktemp -d "${RUNNER_TEMP:-/tmp}/m-empty-nss.XXXXXXXX")
+          trap 'rm -rf -- "$nss_home"' 0
+          if [ "$(uname -s)" = Linux ]
+          then
+            ./m tls-nss-sync "$nss_home"
+            [ ! -e "$nss_home/.m" ]
+            [ ! -e "$nss_home/.pki" ]
+            [ ! -e "$nss_home/.local" ]
+          else
+            if ./m tls-nss-sync "$nss_home" > /dev/null 2>&1
+            then
+              printf '%s\n' 'NSS unexpectedly supported on a non-Linux host' >&2
+              exit 1
+            else
+              [ "$?" -eq 4 ]
+            fi
+          fi
+          rm -rf -- "$nss_home"
+          trap - 0
+
           # No catalog or Node.js is required for bootstrap and local checks.
           [ ! -d "$root/pkg" ] || [ -z "$(ls -A "$root/pkg")" ]
           find lib/sys/sh -type f -name '*.lib.sh' -exec sh -n {} \;

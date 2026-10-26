@@ -4,7 +4,7 @@ This repository contains the technical `m` foundation: the POSIX-shell
 bootstrap, `pkg`, essential commands and library facilities, technical
 localization and manuals, managed public TLS-CA trust, and local services.
 
-The implementation files in this checkout were imported unchanged from
+The initial implementation files in this checkout were imported from
 `massimilianonardi-ai/rumiai-os` revision
 `673df1a2d5476ad57d54c7bc7e1fc2deeaf16195`; package-only manuals
 missing from that source have been added here.

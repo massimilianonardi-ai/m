@@ -10,6 +10,11 @@ tls_nss_fail()
   exit "$3"
 }
 
+. "$m_LIB_DIR/sys/sh/core.lib.sh" ||
+  tls_nss_fail runtime-unavailable 'cannot load the m shell runtime' 29
+loadsyslib "osarch" ||
+  tls_nss_fail osarch-unavailable 'cannot load the host-platform library' 30
+
 tls_nss_digest()
 {
   openssl x509 -in "$1" -outform DER 2>/dev/null |
