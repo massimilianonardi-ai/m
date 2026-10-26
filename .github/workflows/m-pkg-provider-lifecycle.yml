@@ -49,7 +49,19 @@ jobs:
             echo 'FAIL: implicit global provider selection' >&2
             exit 11
           fi
-          ./m pkg provider default nodejs nodejs
+          if ./m pkg provider default nodejs nodejs
+          then
+            :
+          else
+            echo 'PROVIDER DEFAULT FAILED: diagnostic trace of original provider library' >&2
+            ./m sh -c '
+              . "$m_LIB_DIR/sys/sh/core.lib.sh" || exit 1
+              loadsyslib "pkg/pkg-provider" || exit 2
+              set -x
+              _pkg_provider_default nodejs nodejs
+            ' || :
+            exit 19
+          fi
           [ "$(./m pkg provider default nodejs)" = nodejs ]
           [ "$(./m pkg requirement resolve nodejs '=26')" = "$node_concrete" ]
           ./m pkg provider bind jsc nodejs nodejs
