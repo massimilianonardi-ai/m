@@ -23,11 +23,11 @@ DESCRIPTION
 
 FUNCTIONS
     pkg_repository_compare_versions <repository-dir> <left> <right>
-        Print -1, 0 or 1 using numeric ordering of decimal snapshot
-        positions. In this implementation both snapshots are validated
-        against live metadata before comparison, including equality.
-        This upstream dependency for historical comparisons remains
-        pending realignment with PACKAGE-MODEL.md local ordering policy.
+        Print -1, 0 or 1 using numeric ordering of canonical decimal
+        snapshot positions. Comparison is local and does not request
+        upstream metadata, including for historical, removed or equal
+        snapshot positions. This operation does not assert that either
+        snapshot is still available for download.
 
     pkg_repository_resolve_version <repository-dir> [version]
         Resolve and validate the current platform LAST_CHANGE snapshot,
