@@ -23,7 +23,7 @@ jobs:
       - name: Verify real public package dependency/provider/uninstall lifecycle
         shell: sh
         run: |
-          set -eu
+          set -eux
           ./m osarch update
           [ ! -d pkg ] || [ -z "$(ls -A pkg)" ]
 
