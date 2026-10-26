@@ -88,3 +88,30 @@ jobs:
           do
             [ -f "res/sys/manual/${library##*/}" ] || exit 1
           done
+
+          # The inherited browser repository adapters are real m libraries.
+          # Exercise loading and offline semantics on both supported hosts;
+          # live package transport and NSS browser startup are separate gates.
+          ./m manual --no-pager pkg-repository-chrome.lib.sh > /dev/null
+          ./m manual --no-pager pkg-repository-chromium.lib.sh > /dev/null
+          browser_adapters=$(mktemp -d "${RUNNER_TEMP:-/tmp}/m-browser-adapters.XXXXXXXX")
+          trap 'rm -rf -- "$browser_adapters"' 0
+          mkdir -p "$browser_adapters/chrome" "$browser_adapters/chromium"
+          printf 'chrome\n' > "$browser_adapters/chrome/type"
+          printf 'chromium\n' > "$browser_adapters/chromium/type"
+          printf 'Linux_x64\n' > "$browser_adapters/chromium/platform"
+          ./m sh -c '
+            . "$m_LIB_DIR/sys/sh/core.lib.sh" || exit 1
+            loadsyslib "pkg/repository/pkg-repository-chrome" || exit 1
+            [ "$(pkg_repository_compare_versions "$1" 153.0.8010.36-1 153.0.8010.36-2)" = -1 ]
+          ' sh "$browser_adapters/chrome"
+          ./m sh -c '
+            . "$m_LIB_DIR/sys/sh/core.lib.sh" || exit 1
+            loadsyslib "pkg/repository/pkg-repository-chromium" || exit 1
+            command -v pkg_repository_resolve_artifact > /dev/null || exit 1
+            if pkg_repository_resolve_version "$1" invalid >/dev/null 2>&1; then
+              exit 1
+            fi
+          ' sh "$browser_adapters/chromium"
+          rm -rf -- "$browser_adapters"
+          trap - 0
