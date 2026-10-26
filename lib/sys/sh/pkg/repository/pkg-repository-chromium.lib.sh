@@ -194,13 +194,11 @@ pkg_repository_compare_versions()
   _pkg_repository_chromium_validate_version "$2" || return 1
   _pkg_repository_chromium_validate_version "$3" || return 1
 
-  _pkg_repository_chromium_metadata "$1" "$2" >/dev/null || return 1
   if [ "$2" = "$3" ]
   then
     printf -- '0\n'
     return 0
   fi
-  _pkg_repository_chromium_metadata "$1" "$3" >/dev/null || return 1
 
   LC_ALL=C command -p -- awk -v left="$2" -v right="$3" '
 BEGIN {
