@@ -9,6 +9,36 @@ permissions:
   contents: read
 
 jobs:
+  provider-config-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test public provider configuration before any package installation
+        shell: sh
+        run: |
+          set -eux
+          ./m osarch update
+          if ! ./m pkg provider default nodejs nodejs
+          then
+            echo 'FAIL: fresh public provider default set returned nonzero' >&2
+            ./m sh -c '
+              . "$m_LIB_DIR/sys/sh/core.lib.sh" || exit 1
+              loadsyslib "pkg/pkg-provider" || exit 2
+              set -x
+              _pkg_provider_default nodejs nodejs
+            ' || :
+            exit 11
+          fi
+          [ "$(./m pkg provider default nodejs)" = nodejs ]
+          ./m pkg provider bind jsc nodejs nodejs
+          [ "$(./m pkg provider bind jsc nodejs)" = nodejs ]
+          ./m pkg provider bind -u -- jsc nodejs
+          ./m pkg provider default -u -- nodejs
+          if ./m pkg provider default nodejs >/dev/null 2>&1; then exit 12; fi
+          echo 'PASS: independent public provider selector configuration'
   pkg-public-lifecycle:
     strategy:
       fail-fast: false
