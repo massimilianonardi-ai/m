@@ -1,0 +1,104 @@
+name: m real technical command interfaces
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  technical-public:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify public shell state resources log transport digest and extraction
+        shell: sh
+        run: |
+          set -eu
+          ./m osarch update
+          osarch=$(./m osarch)
+          case "$osarch" in linux-*|macos-*) : ;; *) exit 1 ;; esac
+          ./m osarch show > /dev/null
+
+          work=$(mktemp -d)
+          http_pid=
+          cleanup() {
+            if [ -n "$http_pid" ]; then
+              kill "$http_pid" 2>/dev/null || :
+              wait "$http_pid" 2>/dev/null || :
+            fi
+            rm -rf -- "$work"
+          }
+          trap cleanup 0
+          trap 'exit 130' HUP INT TERM
+          mkdir -p "$work/source" "$work/unpacked"
+          printf 'autonomous m technical API\n' > "$work/source/value.txt"
+
+          # Verify the public digest with an independent cryptographic library.
+          actual=$(./m digest -a sha256 -- "$work/source/value.txt")
+          expected=$(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$work/source/value.txt")
+          [ "$actual" = "$expected" ]
+          cat "$work/source/value.txt" | ./m digest -a sha256 > "$work/stdin.sha256"
+          [ "$(cat "$work/stdin.sha256")" = "$expected" ]
+
+          tar -czf "$work/sample.tar.gz" -C "$work/source" value.txt
+          ./m extract tar.gz "$work/sample.tar.gz" "$work/unpacked"
+          cmp "$work/source/value.txt" "$work/unpacked/value.txt"
+
+          # Loopback HTTP is a genuine network transfer, not a mocked fetcher.
+          python3 -u -c '
+          import http.server, pathlib, sys
+          directory, portfile = sys.argv[1:]
+          class Handler(http.server.SimpleHTTPRequestHandler):
+              def __init__(self, *args, **kwargs):
+                  super().__init__(*args, directory=directory, **kwargs)
+          srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+          pathlib.Path(portfile).write_text(str(srv.server_port))
+          srv.serve_forever()
+          ' "$work/source" "$work/http-port" > "$work/http.log" 2>&1 &
+          http_pid=$!
+          i=0
+          until [ -s "$work/http-port" ]
+          do
+            kill -0 "$http_pid" || { cat "$work/http.log" >&2; exit 3; }
+            [ "$i" -lt 30 ] || exit 3
+            i=$((i + 1))
+            sleep 0.1
+          done
+          port=$(cat "$work/http-port")
+          url="http://127.0.0.1:$port/value.txt"
+          ./m http-fetch -t 8 -o "$work/fetched.txt" -- "$url"
+          cmp "$work/source/value.txt" "$work/fetched.txt"
+          [ "$(./m http-fetch -l -t 8 -- "$url")" = "$(wc -c < "$work/source/value.txt" | tr -d ' ')" ]
+
+          # State resolution must not itself materialize mutable directories.
+          state=$(./m state-path user pkg mvalidation home)
+          case "$state" in "$PWD"/*) : ;; *) exit 1 ;; esac
+          [ ! -e "$state" ]
+          if ./m state-path other pkg x home >/dev/null 2>&1; then exit 1; fi
+
+          [ "$(./m lang-set)" = en_US ]
+          [ "$(./m lang validation-unknown missing-message)" = validation-unknown.missing-message ]
+          if ./m lang-set invalid_locale_123 >/dev/null 2>&1; then exit 1; fi
+          [ "$(./m lang-set)" = en_US ]
+          ./m manual --no-pager pkg > "$work/pkg-manual"
+          [ -s "$work/pkg-manual" ]
+          ./m manual > "$work/manual-topics"
+          grep '^sys pkg$' "$work/manual-topics" > /dev/null
+
+          m_LOG_LEVEL=warn ./m log warn validation-unknown missing-message topic test > "$work/log-out" 2> "$work/log-err"
+          [ ! -s "$work/log-out" ]
+          grep 'validation-unknown.missing-message' "$work/log-err" > /dev/null
+          if ./m log invalid validation-unknown missing-message >/dev/null 2>&1; then exit 1; fi
+
+          SHELL=/bin/sh ./m shell -c 'test -n "$m_ROOT" && test -n "$m_LIB_DIR"'
+          echo 'PASS: real public m technical commands, state, digest/extract and loopback HTTP'
