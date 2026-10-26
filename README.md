@@ -33,10 +33,17 @@ The source checkout preserves the existing `m` state and platform-selection
 contract. `osarch update` materializes the platform-specific technical paths
 for the current host. There is no implicit platform mutation in bootstrap.
 
-The currently included repository adapters support GitHub, Node.js and their
-shared artifact functionality. Other upstream adapter types from
-`rumiai-os` are not yet included, so packages requiring them are not
+The currently included repository adapters support GitHub, Node.js, Google
+Chrome's Linux Debian repository, Chromium snapshot storage, and their shared
+artifact functionality. Additional upstream adapter types from `rumiai-os`
+are not yet included, so packages requiring those other adapters are not
 installable through this restricted repository revision.
+
+On Linux, managed Chrome, Chromium and Electron package commands use
+`launcher_nss` to reconcile approved additional system TLS CAs into the
+browser's effective HOME before launching. Browser package installation and
+native browser execution still require the appropriate upstream artifacts,
+host dependencies and permissions.
 
 Operational manuals are under `res/sys/manual`. Current development
 contracts and ongoing source-composition work live in `rumiai-dev`.
